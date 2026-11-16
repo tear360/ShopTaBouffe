@@ -16,3 +16,7 @@ backend/uploads/
 *.apk
 *.aab
 .DS_Store
+
+# signature release (clé privée : jamais sur GitHub)
+android/keystore/
+android/keystore.properties

@@ -19,6 +19,15 @@ val apiProperty: String = (findProperty("delivro.apiUrl") as? String)
     ?: "http://10.0.2.2:3000"
 val apiUrl: String = apiProperty.trim().trimEnd('/') + "/"
 
+// Signature release (non versionnée) : android/keystore.properties, voir docs/GUIDE.md.
+// Sans ce fichier, `assembleRelease` produit un APK non signé (ininstallable).
+val keystoreProps = Properties().apply {
+    val file = rootProject.file("keystore.properties")
+    if (file.exists()) file.inputStream().use { load(it) }
+}
+fun signingProp(key: String, env: String): String? =
+    keystoreProps.getProperty(key)?.takeIf { it.isNotBlank() } ?: System.getenv(env)?.takeIf { it.isNotBlank() }
+
 android {
     namespace = "com.shoptabouffe.app"
     compileSdk = 36
@@ -34,6 +43,17 @@ android {
         vectorDrawables.useSupportLibrary = true
     }
 
+    signingConfigs {
+        create("release") {
+            storeFile = rootProject.file(
+                keystoreProps.getProperty("storeFile") ?: "keystore/shoptabouffe.keystore",
+            )
+            storePassword = signingProp("storePassword", "STB_STORE_PASSWORD")
+            keyAlias = keystoreProps.getProperty("keyAlias") ?: "shoptabouffe"
+            keyPassword = signingProp("keyPassword", "STB_KEY_PASSWORD")
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
@@ -41,6 +61,10 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            // APK signé (mise à jour par-dessus l'installé possible) si les credentials sont là.
+            if (signingProp("storePassword", "STB_STORE_PASSWORD") != null) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 
