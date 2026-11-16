@@ -1,0 +1,18 @@
+# dépendances / builds
+node_modules/
+.gradle/
+build/
+local.properties
+*.iml
+.idea/
+
+# données locales du backend (SQLite, secrets, photos)
+backend/.env
+backend/*.db
+backend/*.db-*
+backend/uploads/
+
+# sorties
+*.apk
+*.aab
+.DS_Store

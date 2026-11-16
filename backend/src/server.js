@@ -1,0 +1,86 @@
+import 'dotenv/config';
+import http from 'node:http';
+import express from 'express';
+import cors from 'cors';
+import cookieParser from 'cookie-parser';
+import { db, ensureReady } from './db.js';
+import { seedIfEmpty } from './seed.js';
+import { initSockets, getIO } from './sockets.js';
+import authRoutes from './routes/auth.js';
+import adminRoutes from './routes/admin.js';
+import productRoutes from './routes/products.js';
+import orderRoutes from './routes/orders.js';
+import conversationRoutes from './routes/conversations.js';
+import uploadRoutes, { UPLOAD_DIR } from './routes/uploads.js';
+
+const PORT = Number(process.env.PORT || 3000);
+const VERSION = '1.0.0';
+
+ensureReady();
+const seeded = seedIfEmpty();
+
+const app = express();
+app.disable('x-powered-by');
+app.use(cors());
+app.use(express.json({ limit: '100kb' }));
+app.use(cookieParser());
+
+// Journal console : timestamp pour chaque requête API
+app.use('/api', (req, res, next) => {
+  const start = Date.now();
+  res.on('finish', () => {
+    console.log(
+      `${new Date().toISOString()} ${req.method} ${req.originalUrl} ${res.statusCode} (${Date.now() - start}ms)`
+    );
+  });
+  next();
+});
+
+app.get('/api/health', (_req, res) => {
+  res.json({ ok: true, version: VERSION });
+});
+
+app.use('/api/auth', authRoutes);
+app.use('/api/admin', adminRoutes);
+app.use('/api/products', productRoutes);
+app.use('/api/orders', orderRoutes);
+app.use('/api/conversations', conversationRoutes);
+app.use('/api/uploads', uploadRoutes);
+
+// Photos produit téléchargées par le fournisseur (5 Mo max, images uniquement).
+app.use(
+  '/uploads',
+  express.static(UPLOAD_DIR, { maxAge: '30d', immutable: true, fallthrough: false }),
+);
+
+app.use('/api', (_req, res) => {
+  res.status(404).json({ error: 'Route introuvable' });
+});
+
+// Erreurs → JSON
+app.use((err, _req, res, _next) => {
+  if (err && err.type === 'entity.parse.failed') {
+    return res.status(400).json({ error: 'JSON invalide' });
+  }
+  console.error('[server] erreur:', err);
+  return res.status(500).json({ error: 'Erreur serveur' });
+});
+
+const server = http.createServer(app);
+initSockets(server);
+app.set('io', getIO());
+
+server.listen(PORT, () => {
+  console.log(`[server] Delivro API v${VERSION} — http://localhost:${PORT}/api (seed: ${seeded} produits)`);
+});
+
+function shutdown(signal) {
+  console.log(`[server] ${signal} — arrêt…`);
+  server.close(() => {
+    db.close();
+    process.exit(0);
+  });
+  setTimeout(() => process.exit(0), 2000).unref();
+}
+process.on('SIGINT', () => shutdown('SIGINT'));
+process.on('SIGTERM', () => shutdown('SIGTERM'));

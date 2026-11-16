@@ -1,0 +1,24 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- carte arrondie orange -->
+    <path
+        android:fillColor="#EF6C33"
+        android:pathData="M0,26 C0,11.64 11.64,0 26,0 H82 C96.36,0 108,11.64 108,26 V82 C108,96.36 96.36,108 82,108 H26 C11.64,108 0,96.36 0,82 Z" />
+
+    <!-- sac de livraison -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M34,45 H74 L70,80 A6,6 0 0 1 64,86 H44 A6,6 0 0 1 38,80 Z" />
+
+    <!-- anse -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M44,47 A10,10 0 0 1 64,47"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="5"
+        android:strokeLineCap="round" />
+</vector>
