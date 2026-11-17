@@ -54,6 +54,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.shoptabouffe.app.MainViewModel
 import com.shoptabouffe.app.core.Config
 import com.shoptabouffe.app.ui.components.PrimaryButton
+import com.shoptabouffe.app.ui.theme.GlassSurfaceStrong
 import com.shoptabouffe.app.ui.theme.Orange
 import com.shoptabouffe.app.ui.theme.TextMuted
 
@@ -66,7 +67,7 @@ private data class Brand(
 
 private fun brandOf(provider: String): Brand = when (provider) {
     "discord" -> Brand(Color(0xFF5865F2), Color.White, Icons.AutoMirrored.Filled.Chat, Color.White)
-    "github" -> Brand(Color(0xFF181717), Color.White, Icons.Filled.Code, Color.White)
+    "github" -> Brand(GlassSurfaceStrong, Color(0xFFF3F4F8), Icons.Filled.Code, Color.White)
     else -> Brand(Color.White, Color(0xFF1F1A17), Icons.Filled.Language, Color(0xFF4285F4))
 }
 
@@ -80,15 +81,6 @@ fun LoginScreen(vm: MainViewModel) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(
-                Brush.verticalGradient(
-                    listOf(
-                        MaterialTheme.colorScheme.primaryContainer,
-                        MaterialTheme.colorScheme.background,
-                        MaterialTheme.colorScheme.background,
-                    )
-                )
-            )
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,

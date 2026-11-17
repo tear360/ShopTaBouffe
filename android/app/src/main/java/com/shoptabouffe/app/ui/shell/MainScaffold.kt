@@ -1,6 +1,8 @@
 package com.shoptabouffe.app.ui.shell
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ReceiptLong
 import androidx.compose.material.icons.outlined.Dashboard
@@ -12,13 +14,17 @@ import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavType
@@ -37,6 +43,10 @@ import com.shoptabouffe.app.ui.screens.gallery.GalleryScreen
 import com.shoptabouffe.app.ui.screens.orders.OrderDetailScreen
 import com.shoptabouffe.app.ui.screens.orders.OrdersScreen
 import com.shoptabouffe.app.ui.screens.profile.ProfileScreen
+import com.shoptabouffe.app.ui.theme.GlassBorder
+import com.shoptabouffe.app.ui.theme.GlassSurface
+import com.shoptabouffe.app.ui.theme.Orange
+import com.shoptabouffe.app.ui.theme.TextMuted
 
 object Routes {
     const val GALLERY = "gallery"
@@ -83,29 +93,46 @@ fun MainScaffold(user: User, vm: MainViewModel) {
     Scaffold(
         bottomBar = {
             if (showBottomBar) {
-                NavigationBar {
-                    tabs.forEach { tab ->
-                        NavigationBarItem(
-                            selected = currentRoute == tab.route,
-                            onClick = {
-                                nav.navigate(tab.route) {
-                                    popUpTo(nav.graph.findStartDestination().id) { saveState = true }
-                                    launchSingleTop = true
-                                    restoreState = true
-                                }
-                            },
-                            icon = {
-                                val icon: @Composable () -> Unit = {
-                                    Icon(tab.icon, contentDescription = tab.label)
-                                }
-                                if (tab.route == Routes.CART && cartCount > 0) {
-                                    BadgedBox(badge = { Badge { Text(cartCount.toString()) } }) { icon() }
-                                } else {
-                                    icon()
-                                }
-                            },
-                            label = { Text(tab.label) },
-                        )
+                Surface(
+                    color = GlassSurface,
+                    border = BorderStroke(1.dp, GlassBorder),
+                    shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+                    shadowElevation = 16.dp,
+                ) {
+                    NavigationBar(
+                        containerColor = Color.Transparent,
+                        tonalElevation = 0.dp,
+                    ) {
+                        tabs.forEach { tab ->
+                            NavigationBarItem(
+                                selected = currentRoute == tab.route,
+                                onClick = {
+                                    nav.navigate(tab.route) {
+                                        popUpTo(nav.graph.findStartDestination().id) { saveState = true }
+                                        launchSingleTop = true
+                                        restoreState = true
+                                    }
+                                },
+                                colors = NavigationBarItemDefaults.colors(
+                                    selectedIconColor = Orange,
+                                    selectedTextColor = Orange,
+                                    unselectedIconColor = TextMuted,
+                                    unselectedTextColor = TextMuted,
+                                    indicatorColor = Orange.copy(alpha = 0.16f),
+                                ),
+                                icon = {
+                                    val icon: @Composable () -> Unit = {
+                                        Icon(tab.icon, contentDescription = tab.label)
+                                    }
+                                    if (tab.route == Routes.CART && cartCount > 0) {
+                                        BadgedBox(badge = { Badge { Text(cartCount.toString()) } }) { icon() }
+                                    } else {
+                                        icon()
+                                    }
+                                },
+                                label = { Text(tab.label) },
+                            )
+                        }
                     }
                 }
             }

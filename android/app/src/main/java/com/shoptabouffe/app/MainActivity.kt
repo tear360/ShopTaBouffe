@@ -9,7 +9,6 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.SideEffect
 import androidx.core.view.WindowCompat
 import com.shoptabouffe.app.ui.AppRoot
@@ -29,13 +28,12 @@ class MainActivity : ComponentActivity() {
         handleDeepLink(intent)
         requestNotificationPermission()
         setContent {
-            val dark = isSystemInDarkTheme()
             SideEffect {
                 val controller = WindowCompat.getInsetsController(window, window.decorView)
-                controller.isAppearanceLightStatusBars = !dark
-                controller.isAppearanceLightNavigationBars = !dark
+                controller.isAppearanceLightStatusBars = false
+                controller.isAppearanceLightNavigationBars = false
             }
-            ShopTaBouffeTheme(darkTheme = dark) {
+            ShopTaBouffeTheme {
                 AppRoot(vm)
             }
         }

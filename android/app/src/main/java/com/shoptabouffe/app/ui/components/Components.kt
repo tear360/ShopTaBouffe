@@ -1,5 +1,6 @@
 package com.shoptabouffe.app.ui.components
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -41,6 +42,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.painter.ColorPainter
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
@@ -51,6 +53,11 @@ import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.shoptabouffe.app.core.statusLabel
 import com.shoptabouffe.app.ui.theme.Amber
+import com.shoptabouffe.app.ui.theme.AccentGradient
+import com.shoptabouffe.app.ui.theme.GlassBorder
+import com.shoptabouffe.app.ui.theme.GlassBorderSoft
+import com.shoptabouffe.app.ui.theme.GlassSurface
+import com.shoptabouffe.app.ui.theme.GlassSurfaceStrong
 import com.shoptabouffe.app.ui.theme.Green
 import com.shoptabouffe.app.ui.theme.Red
 import com.shoptabouffe.app.ui.theme.SurfaceGrey
@@ -127,12 +134,17 @@ fun ShopTaBouffeTopBar(
     navigation: (@Composable () -> Unit)? = null,
     actions: @Composable () -> Unit = {},
 ) {
-    Surface(color = MaterialTheme.colorScheme.surface, shadowElevation = 2.dp) {
+    Surface(
+        color = GlassSurface,
+        border = BorderStroke(1.dp, GlassBorderSoft),
+        shape = RoundedCornerShape(bottomStart = 26.dp, bottomEnd = 26.dp),
+        shadowElevation = 6.dp,
+    ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(64.dp)
-                .padding(horizontal = 8.dp),
+                .padding(horizontal = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (navigation != null) {
@@ -231,8 +243,9 @@ fun ErrorState(message: String, onRetry: (() -> Unit)? = null) {
 @Composable
 fun InfoBanner(message: String) {
     Surface(
-        color = MaterialTheme.colorScheme.primaryContainer,
-        shape = RoundedCornerShape(14.dp),
+        color = GlassSurfaceStrong,
+        border = BorderStroke(1.dp, GlassBorder),
+        shape = RoundedCornerShape(18.dp),
         modifier = Modifier.fillMaxWidth(),
     ) {
         Text(
@@ -255,25 +268,41 @@ fun PrimaryButton(
     loading: Boolean = false,
     icon: ImageVector? = null,
 ) {
-    Button(
-        onClick = onClick,
-        modifier = modifier.height(52.dp),
-        enabled = enabled && !loading,
-        shape = RoundedCornerShape(16.dp),
-        colors = ButtonDefaults.buttonColors(),
+    val shape = RoundedCornerShape(18.dp)
+    Box(
+        modifier = modifier
+            .height(54.dp)
+            .clip(shape)
+            .background(if (enabled && !loading) AccentGradient else SolidColor(SurfaceGrey), shape),
+        contentAlignment = Alignment.Center,
     ) {
-        if (loading) {
-            CircularProgressIndicator(
-                modifier = Modifier.size(20.dp),
-                color = MaterialTheme.colorScheme.onPrimary,
-                strokeWidth = 2.dp,
-            )
-        } else {
-            if (icon != null) {
-                Icon(icon, contentDescription = null, modifier = Modifier.size(20.dp))
-                Spacer(Modifier.width(8.dp))
+        Button(
+            onClick = onClick,
+            modifier = Modifier.fillMaxSize(),
+            enabled = enabled && !loading,
+            shape = shape,
+            colors = ButtonDefaults.buttonColors(
+                containerColor = Color.Transparent,
+                contentColor = Color.White,
+                disabledContainerColor = Color.Transparent,
+                disabledContentColor = Color.White.copy(alpha = 0.45f),
+            ),
+            elevation = null,
+            border = BorderStroke(1.dp, Color(0x33FFFFFF)),
+        ) {
+            if (loading) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(20.dp),
+                    color = MaterialTheme.colorScheme.onPrimary,
+                    strokeWidth = 2.dp,
+                )
+            } else {
+                if (icon != null) {
+                    Icon(icon, contentDescription = null, modifier = Modifier.size(20.dp))
+                    Spacer(Modifier.width(8.dp))
+                }
+                Text(text, style = MaterialTheme.typography.titleSmall)
             }
-            Text(text, style = MaterialTheme.typography.titleSmall)
         }
     }
 }
@@ -374,10 +403,12 @@ fun CardSurface(
     Surface(
         modifier = modifier
             .fillMaxWidth()
+            .clip(RoundedCornerShape(24.dp))
             .let { if (onClick != null) it.clickable(onClick = onClick) else it },
-        shape = RoundedCornerShape(18.dp),
-        color = MaterialTheme.colorScheme.surface,
-        shadowElevation = 1.dp,
+        shape = RoundedCornerShape(24.dp),
+        color = GlassSurface,
+        border = BorderStroke(1.dp, GlassBorder),
+        shadowElevation = 2.dp,
     ) {
         Box { content() }
     }

@@ -1,5 +1,5 @@
 <resources>
-    <color name="background">#FFFDF9F6</color>
-    <color name="surface">#FFFFFFFF</color>
+    <color name="background">#FF0B0C11</color>
+    <color name="surface">#FF16181F</color>
     <color name="primary">#FFEF6C33</color>
 </resources>

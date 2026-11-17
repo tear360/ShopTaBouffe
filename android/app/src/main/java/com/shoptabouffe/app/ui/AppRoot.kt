@@ -1,10 +1,12 @@
 package com.shoptabouffe.app.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.AlertDialog
@@ -24,6 +26,7 @@ import com.shoptabouffe.app.core.Updater
 import com.shoptabouffe.app.ui.components.ErrorState
 import com.shoptabouffe.app.ui.screens.login.LoginScreen
 import com.shoptabouffe.app.ui.shell.MainScaffold
+import com.shoptabouffe.app.ui.theme.AppBackgroundGradient
 import com.shoptabouffe.app.ui.theme.Orange
 
 /** Racine de l'UI : bascule entre chargement, connexion et application. */
@@ -31,7 +34,11 @@ import com.shoptabouffe.app.ui.theme.Orange
 fun AppRoot(vm: MainViewModel) {
     val state by vm.auth.collectAsStateWithLifecycle()
 
-    Box(modifier = Modifier.fillMaxSize()) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(AppBackgroundGradient),
+    ) {
         when (val s = state) {
             MainViewModel.AuthState.Loading -> SplashScreen()
 
