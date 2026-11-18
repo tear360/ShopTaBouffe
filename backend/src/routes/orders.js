@@ -45,6 +45,37 @@ function buildOrder(row, includeCustomer) {
   return out;
 }
 
+/**
+ * Journalise une vente à la livraison (espace Finances).
+ * Copie figée : survit à la purge de 2 h de la commande.
+ */
+function recordSale(order) {
+  if (db.prepare('SELECT id FROM sales WHERE order_id = ?').get(order.id)) return;
+  const items = db.prepare('SELECT * FROM order_items WHERE order_id = ?').all(order.id);
+  const ts = nowIso();
+  db.transaction(() => {
+    const sale = db
+      .prepare('INSERT INTO sales (order_id, total_cents, delivered_at) VALUES (?, ?, ?)')
+      .run(order.id, order.total_cents, ts);
+    const insertItem = db.prepare(
+      'INSERT INTO sale_items (sale_id, product_id, name, price_cents, cost_cents, qty) VALUES (?, ?, ?, ?, ?, ?)'
+    );
+    for (const it of items) {
+      const product = it.product_id
+        ? db.prepare('SELECT cost_cents FROM products WHERE id = ?').get(it.product_id)
+        : null;
+      insertItem.run(
+        sale.lastInsertRowid,
+        it.product_id,
+        it.name,
+        it.price_cents,
+        product?.cost_cents ?? 0,
+        it.qty
+      );
+    }
+  })();
+}
+
 /** POST /api/orders */
 router.post('/', requireAuth, (req, res) => {
   const body = req.body && typeof req.body === 'object' ? req.body : {};
@@ -147,6 +178,7 @@ router.patch('/:id', requireAuth, requireSupplier, (req, res) => {
     return res.status(409).json({ error: `Transition invalide: ${row.status} → ${status}` });
   }
   db.prepare('UPDATE orders SET status = ?, updated_at = ? WHERE id = ?').run(status, nowIso(), row.id);
+  if (status === 'delivered') recordSale(row);
   const updated = db.prepare('SELECT * FROM orders WHERE id = ?').get(row.id);
   const io = getIO();
   io?.to(`user:${updated.user_id}`).emit('order:updated', { ...buildOrder(updated, false), mine: true });

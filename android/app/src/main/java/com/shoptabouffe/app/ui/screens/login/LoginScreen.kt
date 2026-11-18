@@ -53,7 +53,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.shoptabouffe.app.MainViewModel
 import com.shoptabouffe.app.core.Config
 import com.shoptabouffe.app.ui.components.PrimaryButton
-import com.shoptabouffe.app.ui.theme.GlassSurfaceStrong
 import com.shoptabouffe.app.ui.theme.Orange
 import com.shoptabouffe.app.ui.theme.TextMuted
 
@@ -65,7 +64,8 @@ private data class Brand(
 )
 
 private fun brandOf(provider: String): Brand = when (provider) {
-    "github" -> Brand(GlassSurfaceStrong, Color(0xFFF3F4F8), Icons.Filled.Code, Color.White)
+    // Boutons clairs aux deux : lisibles quel que soit le fond.
+    "github" -> Brand(Color(0xFFF6F8FA), Color(0xFF24292F), Icons.Filled.Code, Color(0xFF24292F))
     else -> Brand(Color.White, Color(0xFF1F1A17), Icons.Filled.Language, Color(0xFF4285F4))
 }
 
@@ -110,26 +110,6 @@ fun LoginScreen(vm: MainViewModel) {
         )
 
         Spacer(Modifier.height(36.dp))
-
-        Config.PROVIDERS.forEach { provider ->
-            OAuthButton(provider = provider) { vm.startOAuth(provider, context) }
-            Spacer(Modifier.height(14.dp))
-        }
-
-        Spacer(Modifier.height(6.dp))
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            HorizontalLine()
-            Text(
-                " ou ",
-                style = MaterialTheme.typography.bodySmall,
-                color = TextMuted,
-            )
-            HorizontalLine()
-        }
-        Spacer(Modifier.height(14.dp))
 
         notice?.let { message ->
             Surface(
@@ -183,13 +163,33 @@ fun LoginScreen(vm: MainViewModel) {
 
         Spacer(Modifier.height(10.dp))
         Text(
-            "Sans compte : commandes possibles. Le chat avec le fournisseur est réservé aux comptes GitHub / Google.",
+            "Sans compte : commandes possibles. Le chat avec le fournisseur est réservé aux comptes Google / GitHub.",
             style = MaterialTheme.typography.bodySmall,
             color = TextMuted,
             textAlign = TextAlign.Center,
         )
 
         Spacer(Modifier.height(28.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            HorizontalLine()
+            Text(
+                " ou continuer avec ",
+                style = MaterialTheme.typography.bodySmall,
+                color = TextMuted,
+            )
+            HorizontalLine()
+        }
+        Spacer(Modifier.height(14.dp))
+
+        Config.PROVIDERS.forEach { provider ->
+            OAuthButton(provider = provider) { vm.startOAuth(provider, context) }
+            Spacer(Modifier.height(14.dp))
+        }
+
+        Spacer(Modifier.height(14.dp))
         Text(
             "Serveur : ${Config.HOST}",
             style = MaterialTheme.typography.labelSmall,
@@ -214,21 +214,19 @@ private fun OAuthButton(provider: String, onClick: () -> Unit) {
             contentColor = brand.foreground,
         ),
         elevation = ButtonDefaults.buttonElevation(
-            defaultElevation = if (provider == "google") 2.dp else 4.dp,
+            defaultElevation = 2.dp,
             pressedElevation = 1.dp,
             disabledElevation = 0.dp,
         ),
-        border = if (provider == "google") {
-            BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
-        } else null,
+        border = BorderStroke(
+            1.dp,
+            if (provider == "google") Color(0xFFDADCE0) else Color(0xFFD0D7DE),
+        ),
     ) {
         Box(
             modifier = Modifier
                 .size(26.dp)
-                .background(
-                    if (provider == "google") Color(0x14000000) else Color.White.copy(alpha = 0.18f),
-                    CircleShape
-                ),
+                .background(Color(0x0F000000), CircleShape),
             contentAlignment = Alignment.Center,
         ) {
             Icon(

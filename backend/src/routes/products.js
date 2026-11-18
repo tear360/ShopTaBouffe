@@ -29,6 +29,12 @@ function validateFields(body, partial) {
     if (!Number.isInteger(price) || price < 0) errors.push('priceCents: entier ≥ 0');
     else fields.priceCents = price;
   }
+  // Prix de revient (coût d'achat) → marge. Requis au POST (défaut 0), optionnel en PATCH.
+  if (has('costCents') || !partial) {
+    const cost = has('costCents') ? body.costCents : 0;
+    if (!Number.isInteger(cost) || cost < 0) errors.push('costCents: entier ≥ 0');
+    else fields.costCents = cost;
+  }
   if (!partial || has('category')) {
     const category = typeof body.category === 'string' ? body.category.trim() : '';
     if (category.length < 1 || category.length > 60) errors.push('category: 1 à 60 caractères');
@@ -92,12 +98,13 @@ router.post('/', requireAuth, requireSupplier, (req, res) => {
   if (!ok) return res.status(400).json({ error: `Champs invalides: ${errors.join(', ')}` });
   const info = db
     .prepare(
-      'INSERT INTO products (name, description, price_cents, category, image_url, available, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+      'INSERT INTO products (name, description, price_cents, cost_cents, category, image_url, available, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
     )
     .run(
       fields.name,
       fields.description,
       fields.priceCents,
+      fields.costCents,
       fields.category,
       fields.imageUrl,
       fields.available ? 1 : 0,
@@ -120,6 +127,7 @@ router.patch('/:id', requireAuth, requireSupplier, (req, res) => {
   const columnFor = {
     name: 'name',
     priceCents: 'price_cents',
+    costCents: 'cost_cents',
     category: 'category',
     description: 'description',
     imageUrl: 'image_url',

@@ -1,5 +1,7 @@
 import 'dotenv/config';
 import http from 'node:http';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import express from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
@@ -9,6 +11,8 @@ import { initSockets, getIO } from './sockets.js';
 import authRoutes from './routes/auth.js';
 import adminRoutes from './routes/admin.js';
 import productRoutes from './routes/products.js';
+import categoryRoutes from './routes/categories.js';
+import financeRoutes from './routes/finances.js';
 import orderRoutes from './routes/orders.js';
 import conversationRoutes from './routes/conversations.js';
 import uploadRoutes, { UPLOAD_DIR } from './routes/uploads.js';
@@ -16,6 +20,9 @@ import { startCleanup } from './cleanup.js';
 
 const PORT = Number(process.env.PORT || 3000);
 const VERSION = '1.0.0';
+
+/** UI web (client Windows / navigateur) : backend/../web */
+const WEB_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../web');
 
 ensureReady();
 const seeded = seedIfEmpty();
@@ -44,6 +51,8 @@ app.get('/api/health', (_req, res) => {
 app.use('/api/auth', authRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/products', productRoutes);
+app.use('/api/categories', categoryRoutes);
+app.use('/api/finances', financeRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/conversations', conversationRoutes);
 app.use('/api/uploads', uploadRoutes);
@@ -56,6 +65,12 @@ app.use(
 
 app.use('/api', (_req, res) => {
   res.status(404).json({ error: 'Route introuvable' });
+});
+
+// UI web (app Windows / navigateur) : fichiers statiques + repli SPA
+app.use(express.static(WEB_DIR, { index: 'index.html', maxAge: '5m' }));
+app.get('*', (_req, res) => {
+  res.sendFile(path.join(WEB_DIR, 'index.html'));
 });
 
 // Erreurs → JSON

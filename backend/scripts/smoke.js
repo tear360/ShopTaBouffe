@@ -195,6 +195,25 @@ async function runAll() {
     assert(found.customer && found.customer.id === state.userA.id, 'customer absent');
   });
 
+  await step('PATCH /api/products/:id (prix de revient costCents)', async () => {
+    const p = state.products[0];
+    state.origCost = p.costCents ?? 0;
+    const r = await api('PATCH', `/api/products/${p.id}`, {
+      token: state.tokenA,
+      body: { costCents: 350 },
+    });
+    assert(r.status === 200, `status ${r.status} ${r.text}`);
+    assert(r.json.costCents === 350, `costCents = ${r.json.costCents}`);
+    const anon = await api('PATCH', `/api/products/${p.id}`, { body: { costCents: 1 } });
+    assert(anon.status === 401, `PATCH sans token = ${anon.status}`);
+    const bad = await api('PATCH', `/api/products/${p.id}`, {
+      token: state.tokenA,
+      body: { costCents: -5 },
+    });
+    assert(bad.status === 400, `costCents négatif = ${bad.status} (attendu 400)`);
+    state.products[0] = r.json;
+  });
+
   await step('PATCH /api/orders/:id (transitions strictes + 409 + 403)', async () => {
     const id = state.order.id;
     const patch = (status, token = state.tokenA) =>
@@ -209,6 +228,139 @@ async function runAll() {
     assert(asCustomer.status === 403, `PATCH customer = ${asCustomer.status} (attendu 403)`);
     const viewAsB = await api('GET', `/api/orders/${id}`, { token: state.tokenB });
     assert(viewAsB.status === 403, `GET order par autrui = ${viewAsB.status} (attendu 403)`);
+  });
+
+  await step('GET /api/categories (public, seed ≥ 10)', async () => {
+    const r = await api('GET', '/api/categories');
+    assert(r.status === 200, `status ${r.status}`);
+    assert(Array.isArray(r.json.categories), 'categories absent');
+    assert(r.json.categories.length >= 10, `seed ${r.json.categories.length} < 10`);
+    const c = r.json.categories[0];
+    assert(c.name && typeof c.productsCount === 'number', 'shape catégorie KO');
+  });
+
+  await step('CRUD catégories (supplier) + 403 client', async () => {
+    const stamp = Date.now().toString(36);
+    const name = `SmokeCat ${stamp}`;
+    const forbidden = await api('POST', '/api/categories', { token: state.tokenB, body: { name } });
+    assert(forbidden.status === 403, `POST client = ${forbidden.status} (attendu 403)`);
+
+    const created = await api('POST', '/api/categories', { token: state.tokenA, body: { name } });
+    assert(created.status === 201, `POST → ${created.status} ${created.text}`);
+    const catId = created.json.id;
+
+    const dup = await api('POST', '/api/categories', { token: state.tokenA, body: { name } });
+    assert(dup.status === 409, `doublon → ${dup.status} (attendu 409)`);
+    const missing = await api('POST', '/api/categories', { token: state.tokenA, body: {} });
+    assert(missing.status === 400, `sans name → ${missing.status} (attendu 400)`);
+
+    // produit dans la catégorie
+    const prod = await api('POST', '/api/products', {
+      token: state.tokenA,
+      body: { name: `SmokeProd ${stamp}`, description: '', priceCents: 1000, costCents: 400, category: name },
+    });
+    assert(prod.status === 201, `POST product → ${prod.status} ${prod.text}`);
+    assert(prod.json.costCents === 400, `costCents = ${prod.json.costCents}`);
+    const prodId = prod.json.id;
+
+    // renommage → les produits suivent (filtres non cassés)
+    const newName = `${name} bis`;
+    const renamed = await api('PATCH', `/api/categories/${catId}`, {
+      token: state.tokenA,
+      body: { name: newName },
+    });
+    assert(renamed.status === 200 && renamed.json.name === newName, `PATCH → ${renamed.status}`);
+    const check = await api('GET', `/api/products/${prodId}`);
+    assert(check.json.category === newName, `produit.category = ${check.json.category} (attendu ${newName})`);
+    const notFound = await api('PATCH', '/api/categories/99999999', {
+      token: state.tokenA,
+      body: { name: 'x' },
+    });
+    assert(notFound.status === 404, `PATCH inconnu → ${notFound.status}`);
+
+    // suppression refusée tant que des produits l'utilisent
+    const used = await api('DELETE', `/api/categories/${catId}`, { token: state.tokenA });
+    assert(used.status === 409, `DELETE utilisée → ${used.status} (attendu 409)`);
+    const delProd = await api('DELETE', `/api/products/${prodId}`, { token: state.tokenA });
+    assert(delProd.status === 204, `DELETE product → ${delProd.status}`);
+    const delCat = await api('DELETE', `/api/categories/${catId}`, { token: state.tokenA });
+    assert(delCat.status === 204, `DELETE catégorie → ${delCat.status}`);
+    const again = await api('DELETE', `/api/categories/${catId}`, { token: state.tokenA });
+    assert(again.status === 404, `2e DELETE → ${again.status} (attendu 404)`);
+  });
+
+  await step('GET /api/finances/summary (revenus, coûts, marge) + 403 client', async () => {
+    const forbidden = await api('GET', '/api/finances/summary', { token: state.tokenB });
+    assert(forbidden.status === 403, `client → ${forbidden.status} (attendu 403)`);
+    const r = await api('GET', '/api/finances/summary', { token: state.tokenA });
+    assert(r.status === 200, `status ${r.status} ${r.text}`);
+    const s = r.json;
+    // la commande livrée à l'étape précédente est journalisée
+    assert(s.revenueCents >= state.order.totalCents, `revenue ${s.revenueCents} < commande ${state.order.totalCents}`);
+    assert(s.orders >= 1, `orders = ${s.orders}`);
+    // coût figé : 350 × 2 (produit 1) + 0 × 1 (produit 2)
+    assert(s.costCents >= 700, `costCents = ${s.costCents} (attendu ≥ 700)`);
+    assert(s.grossMarginCents === s.revenueCents - s.costCents, 'marge brute incohérente');
+    assert(s.netCents === s.grossMarginCents - s.expensesCents, 'résultat net incohérent');
+    assert(s.units >= 3, `units = ${s.units}`);
+    const bad = await api('GET', '/api/finances/summary?from=18-11-2026', { token: state.tokenA });
+    assert(bad.status === 400, `from invalide → ${bad.status} (attendu 400)`);
+  });
+
+  await step('GET /api/finances/sales + /products (journal figé à la livraison)', async () => {
+    const r = await api('GET', '/api/finances/sales', { token: state.tokenA });
+    assert(r.status === 200, `status ${r.status}`);
+    const sale = r.json.sales.find((x) => x.orderId === state.order.id);
+    assert(sale, 'vente de la commande absente du journal');
+    assert(sale.totalCents === state.order.totalCents, 'totalCents KO');
+    assert(sale.items.length === 2, `items = ${sale.items.length}`);
+    const item1 = sale.items.find((i) => i.productId === state.products[0].id);
+    assert(item1 && item1.costCents === 350, `cost_cents figé = ${item1 && item1.costCents}`);
+    const item2 = sale.items.find((i) => i.productId === state.products[1].id);
+    assert(item2 && item2.costCents === 0, `cost item2 = ${item2 && item2.costCents}`);
+
+    const prods = await api('GET', '/api/finances/products', { token: state.tokenA });
+    assert(prods.status === 200, `products → ${prods.status}`);
+    const row = prods.json.products.find((p) => p.productId === state.products[0].id);
+    assert(row, 'produit absent du détail finances');
+    assert(row.units >= 2, `units = ${row.units}`);
+    assert(row.marginCents === row.revenueCents - row.costCents, 'marge produit incohérente');
+  });
+
+  await step('CRUD /api/finances/expenses (dépense manuelle)', async () => {
+    const stamp = Date.now().toString(36);
+    const bad = await api('POST', '/api/finances/expenses', {
+      token: state.tokenA,
+      body: { label: '', amountCents: -1 },
+    });
+    assert(bad.status === 400, `invalides → ${bad.status} (attendu 400)`);
+    const created = await api('POST', '/api/finances/expenses', {
+      token: state.tokenA,
+      body: { label: `Loyer ${stamp}`, amountCents: 15000 },
+    });
+    assert(created.status === 201, `POST → ${created.status} ${created.text}`);
+    assert(created.json.amountCents === 15000 && created.json.date, 'shape dépense KO');
+    state.expenseId = created.json.id;
+
+    const patched = await api('PATCH', `/api/finances/expenses/${created.json.id}`, {
+      token: state.tokenA,
+      body: { amountCents: 12000 },
+    });
+    assert(patched.status === 200 && patched.json.amountCents === 12000, 'PATCH KO');
+
+    const sum = await api('GET', '/api/finances/summary', { token: state.tokenA });
+    assert(sum.json.expensesCents >= 12000, `expensesCents = ${sum.json.expensesCents}`);
+    assert(sum.json.netCents === sum.json.grossMarginCents - sum.json.expensesCents, 'net KO après dépense');
+
+    const forbidden = await api('DELETE', `/api/finances/expenses/${created.json.id}`, {
+      token: state.tokenB,
+    });
+    assert(forbidden.status === 403, `DELETE client → ${forbidden.status}`);
+    const del = await api('DELETE', `/api/finances/expenses/${created.json.id}`, { token: state.tokenA });
+    assert(del.status === 204, `DELETE → ${del.status}`);
+    const del2 = await api('DELETE', `/api/finances/expenses/${created.json.id}`, { token: state.tokenA });
+    assert(del2.status === 404, `2e DELETE → ${del2.status} (attendu 404)`);
+    state.expenseId = null;
   });
 
   await step('GET /api/conversations (client vérifié crée, supplier liste)', async () => {
@@ -354,6 +506,37 @@ async function runAll() {
     // nettoyage des restes du test
     db.prepare('DELETE FROM conversations WHERE id = ?').run(conv2);
     db.prepare('DELETE FROM orders WHERE id = ?').run(active);
+  });
+
+  await step('Journal des ventes : survit à la purge de 2 h', async () => {
+    const sale = db.prepare('SELECT * FROM sales WHERE order_id = ?').get(state.order.id);
+    assert(sale, 'vente non journalisée à la livraison');
+    // la commande devient « vieille » → la purge doit la supprimer…
+    const old = new Date(Date.now() - 3 * 3600 * 1000).toISOString();
+    db.prepare('UPDATE orders SET created_at = ?, updated_at = ? WHERE id = ?').run(
+      old,
+      old,
+      state.order.id,
+    );
+    db.prepare('UPDATE sales SET delivered_at = ? WHERE order_id = ?').run(old, state.order.id);
+    const before = db.prepare('SELECT COUNT(*) AS n FROM sales').get().n;
+    purgeCompletedOrders();
+    // …mais la vente reste : c'est le livre de comptes du fournisseur.
+    assert(
+      !db.prepare('SELECT 1 AS x FROM orders WHERE id = ?').get(state.order.id),
+      'commande purgée attendue',
+    );
+    const after = db.prepare('SELECT * FROM sales WHERE order_id = ?').get(state.order.id);
+    assert(after, 'vente perdue pendant la purge !');
+    const items = db.prepare('SELECT * FROM sale_items WHERE sale_id = ?').all(after.id);
+    assert(items.length === 2, `sale_items = ${items.length} (attendu 2)`);
+    assert(db.prepare('SELECT COUNT(*) AS n FROM sales').get().n === before, 'nb de ventes modifié');
+    // remise à zéro des données de test (prod propre)
+    db.prepare('DELETE FROM sales WHERE order_id = ?').run(state.order.id);
+    db.prepare('UPDATE products SET cost_cents = ? WHERE id = ?').run(
+      state.origCost ?? 0,
+      state.products[0].id,
+    );
   });
 
   if (state.sock) state.sock.close();

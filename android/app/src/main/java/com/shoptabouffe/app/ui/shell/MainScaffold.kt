@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ReceiptLong
+import androidx.compose.material.icons.outlined.AccountBalanceWallet
 import androidx.compose.material.icons.outlined.Dashboard
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.ShoppingCart
@@ -39,6 +40,7 @@ import com.shoptabouffe.app.core.models.User
 import com.shoptabouffe.app.ui.screens.admin.AdminScreen
 import com.shoptabouffe.app.ui.screens.cart.CartScreen
 import com.shoptabouffe.app.ui.screens.chat.ChatScreen
+import com.shoptabouffe.app.ui.screens.finances.FinancesScreen
 import com.shoptabouffe.app.ui.screens.gallery.GalleryScreen
 import com.shoptabouffe.app.ui.screens.orders.OrderDetailScreen
 import com.shoptabouffe.app.ui.screens.orders.OrdersScreen
@@ -54,6 +56,7 @@ object Routes {
     const val ORDERS = "orders"
     const val PROFILE = "profile"
     const val ADMIN = "admin"
+    const val FINANCES = "finances"
     const val ORDER = "order/{orderId}"
     const val CHAT = "chat/{conversationId}"
 
@@ -85,7 +88,10 @@ fun MainScaffold(user: User, vm: MainViewModel) {
                 TabSpec(Routes.ORDERS, "Commandes", Icons.AutoMirrored.Outlined.ReceiptLong)
             } else null,
             if (user.isSupplier) {
-                TabSpec(Routes.ADMIN, "Fournisseur", Icons.Outlined.Dashboard)
+                TabSpec(Routes.ADMIN, "Produits", Icons.Outlined.Dashboard)
+            } else null,
+            if (user.isSupplier) {
+                TabSpec(Routes.FINANCES, "Finances", Icons.Outlined.AccountBalanceWallet)
             } else null,
             TabSpec(Routes.PROFILE, "Profil", Icons.Outlined.Person),
         )
@@ -193,6 +199,10 @@ fun MainScaffold(user: User, vm: MainViewModel) {
 
             composable(Routes.ADMIN) {
                 AdminScreen(onOpenChat = { nav.navigate(Routes.chat(it)) })
+            }
+
+            composable(Routes.FINANCES) {
+                FinancesScreen()
             }
 
             composable(Routes.PROFILE) {

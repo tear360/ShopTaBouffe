@@ -154,6 +154,7 @@ fun GalleryScreen(
                     items(state.visible, key = { it.id }) { product ->
                         ProductCard(
                             product = product,
+                            isSupplier = isSupplier,
                             qtyInCart = cartLines.firstOrNull { it.product.id == product.id }?.qty ?: 0,
                             onClick = { vm.openSheet(product) },
                             onAdd = {
@@ -300,6 +301,7 @@ private fun ProductSheet(
 @Composable
 private fun ProductCard(
     product: Product,
+    isSupplier: Boolean,
     qtyInCart: Int,
     onClick: () -> Unit,
     onAdd: () -> Unit,
@@ -363,6 +365,7 @@ private fun ProductCard(
                         modifier = Modifier.weight(1f),
                     )
                     when {
+                        // Un vendeur ne passe pas commande : plus de bouton + sur ses produits.
                         !product.available -> {
                             Text(
                                 "—",
@@ -370,6 +373,8 @@ private fun ProductCard(
                                 color = MaterialTheme.colorScheme.outline,
                             )
                         }
+
+                        isSupplier -> Unit
 
                         qtyInCart > 0 -> QuantitySelector(
                             qty = qtyInCart,

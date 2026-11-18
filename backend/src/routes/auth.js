@@ -44,13 +44,19 @@ function upsertOAuthUser(provider, profile) {
   return db.prepare('SELECT * FROM users WHERE id = ?').get(info.lastInsertRowid);
 }
 
-/** GET /api/auth/start?provider=github|google */
+/** GET /api/auth/start?provider=github|google[&target=web] */
 router.get('/start', (req, res) => {
   const provider = String(req.query.provider || '');
   const conf = PROVIDERS[provider];
   if (!conf) return res.status(404).json({ error: 'Fournisseur inconnu' });
+  // target=web : le client est l'app Windows / le navigateur → retour sur /?token=…
+  const isWeb = String(req.query.target || '') === 'web';
   if (!isConfigured(conf)) {
-    return res.redirect(`${PUBLIC_URL}/api/auth/failed?reason=not_configured`);
+    return res.redirect(
+      isWeb
+        ? `${PUBLIC_URL}/?error=not_configured`
+        : `${PUBLIC_URL}/api/auth/failed?reason=not_configured`
+    );
   }
   const state = createState(provider);
   res.cookie('oauth_state', state, {
@@ -59,12 +65,21 @@ router.get('/start', (req, res) => {
     maxAge: 10 * 60 * 1000,
     path: '/',
   });
+  res.cookie('oauth_target', isWeb ? 'web' : 'app', {
+    httpOnly: true,
+    sameSite: 'lax',
+    maxAge: 10 * 60 * 1000,
+    path: '/',
+  });
   return res.redirect(conf.authorize(state));
 });
 
-/** GET /api/auth/failed?reason=… → deep link d'erreur */
+/** GET /api/auth/failed?reason=… → deep link d'erreur (ou /?error=… côté web) */
 router.get('/failed', (req, res) => {
   const reason = ERROR_REASONS.has(String(req.query.reason)) ? String(req.query.reason) : 'provider_error';
+  const isWeb = req.cookies && req.cookies.oauth_target === 'web';
+  res.clearCookie('oauth_target', { path: '/' });
+  if (isWeb) return res.redirect(`${PUBLIC_URL}/?error=${encodeURIComponent(reason)}`);
   return res.redirect(deepLink({ error: reason }));
 });
 
@@ -72,8 +87,11 @@ router.get('/failed', (req, res) => {
 router.get('/:provider/callback', async (req, res) => {
   const provider = String(req.params.provider);
   const conf = PROVIDERS[provider];
+  const isWeb = req.cookies && req.cookies.oauth_target === 'web';
   const fail = (code) => {
     res.clearCookie('oauth_state', { path: '/' });
+    res.clearCookie('oauth_target', { path: '/' });
+    if (isWeb) return res.redirect(`${PUBLIC_URL}/?error=${encodeURIComponent(code)}`);
     return res.redirect(deepLink({ error: code }));
   };
 
@@ -95,6 +113,16 @@ router.get('/:provider/callback', async (req, res) => {
     const user = upsertOAuthUser(provider, profile);
     const token = signToken(user);
     res.clearCookie('oauth_state', { path: '/' });
+    res.clearCookie('oauth_target', { path: '/' });
+    if (isWeb) {
+      // Retour app Windows / navigateur : le token passe par l'URL, la page le stocke.
+      const qs = new URLSearchParams({
+        token,
+        name: user.name,
+        role: user.role,
+      }).toString();
+      return res.redirect(`${PUBLIC_URL}/?${qs}`);
+    }
     return res.redirect(
       deepLink({
         token,

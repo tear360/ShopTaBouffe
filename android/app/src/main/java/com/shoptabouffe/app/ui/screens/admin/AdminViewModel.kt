@@ -7,6 +7,8 @@ import com.shoptabouffe.app.core.Api
 import com.shoptabouffe.app.core.ApiResult
 import com.shoptabouffe.app.core.SocketManager
 import com.shoptabouffe.app.core.models.Conversation
+import com.shoptabouffe.app.core.models.Category
+import com.shoptabouffe.app.core.models.CategoryBody
 import com.shoptabouffe.app.core.models.CreateProductBody
 import com.shoptabouffe.app.core.models.Order
 import com.shoptabouffe.app.core.models.Product
@@ -25,11 +27,13 @@ data class AdminState(
     val orders: List<Order> = emptyList(),
     val products: List<Product> = emptyList(),
     val conversations: List<Conversation> = emptyList(),
+    val categories: List<Category> = emptyList(),
     val statusFilter: String = "all",
     val busy: Boolean = false,
     val notice: String? = null,
     val editingProduct: Product? = null,
     val showProductDialog: Boolean = false,
+    val showCategoriesDialog: Boolean = false,
     val confirmDelete: Product? = null,
 ) {
     val pendingCount: Int get() = orders.count { it.status == "pending" }
@@ -57,6 +61,7 @@ class AdminViewModel(app: Application) : AndroidViewModel(app) {
 
     init {
         loadAll()
+        loadCategories()
         unsubscribes = listOfNotNull(
             SocketManager.on("order:new") { loadOrders(refreshing = true) },
             SocketManager.on("order:updated") { loadOrders(refreshing = true) },
@@ -64,6 +69,7 @@ class AdminViewModel(app: Application) : AndroidViewModel(app) {
             SocketManager.on("product:changed") { loadProducts() },
             SocketManager.on("message:new") { loadConversations() },
             SocketManager.on("conversation:deleted") { loadConversations() },
+            SocketManager.on("categories:changed") { loadCategories() },
         )
     }
 
@@ -223,6 +229,64 @@ class AdminViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun consumeNotice() = _state.update { it.copy(notice = null) }
+
+    /* --------------------------------------------------------- catégories */
+
+    fun loadCategories() {
+        viewModelScope.launch {
+            when (val result = Api.call { Api.service.categories() }) {
+                is ApiResult.Success -> _state.update {
+                    it.copy(categories = result.data.categories)
+                }
+
+                is ApiResult.Failure -> Unit
+            }
+        }
+    }
+
+    fun openCategoriesDialog() = _state.update { it.copy(showCategoriesDialog = true) }
+
+    fun closeCategoriesDialog() = _state.update { it.copy(showCategoriesDialog = false) }
+
+    fun createCategory(name: String) {
+        viewModelScope.launch {
+            when (val result = Api.call { Api.service.createCategory(CategoryBody(name.trim())) }) {
+                is ApiResult.Success -> {
+                    _state.update { it.copy(notice = "Catégorie « ${result.data.name} » ajoutée.") }
+                    loadCategories()
+                }
+
+                is ApiResult.Failure -> _state.update { it.copy(notice = result.message) }
+            }
+        }
+    }
+
+    fun renameCategory(id: Long, name: String) {
+        viewModelScope.launch {
+            when (val result = Api.call { Api.service.updateCategory(id, CategoryBody(name.trim())) }) {
+                is ApiResult.Success -> {
+                    _state.update { it.copy(notice = "Catégorie renommée en « ${result.data.name} ».") }
+                    loadCategories()
+                    loadProducts()
+                }
+
+                is ApiResult.Failure -> _state.update { it.copy(notice = result.message) }
+            }
+        }
+    }
+
+    fun deleteCategory(category: Category) {
+        viewModelScope.launch {
+            when (val result = Api.call { Api.service.deleteCategory(category.id) }) {
+                is ApiResult.Success -> {
+                    _state.update { it.copy(notice = "Catégorie « ${category.name} » supprimée.") }
+                    loadCategories()
+                }
+
+                is ApiResult.Failure -> _state.update { it.copy(notice = result.message) }
+            }
+        }
+    }
 
     override fun onCleared() {
         unsubscribes.forEach { it.invoke() }

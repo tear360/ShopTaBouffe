@@ -26,12 +26,13 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Chat
 import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Inventory2
 import androidx.compose.material.icons.outlined.MarkChatRead
-import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.outlined.Sell
 import androidx.compose.material.icons.outlined.ShoppingBag
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
@@ -75,6 +76,7 @@ import kotlinx.coroutines.launch
 import com.shoptabouffe.app.core.Api
 import com.shoptabouffe.app.core.ApiResult
 import com.shoptabouffe.app.core.Config
+import com.shoptabouffe.app.core.models.Category
 import com.shoptabouffe.app.core.models.Conversation
 import com.shoptabouffe.app.core.models.CreateProductBody
 import com.shoptabouffe.app.core.models.Order
@@ -153,9 +155,6 @@ fun AdminScreen(onOpenChat: (Long) -> Unit) {
                         },
                     )
                 }
-                IconButton(onClick = { vm.loadAll() }) {
-                    Icon(Icons.Outlined.Refresh, contentDescription = "Rafraîchir")
-                }
             }
 
             when (state.tab) {
@@ -175,9 +174,21 @@ fun AdminScreen(onOpenChat: (Long) -> Unit) {
         if (state.showProductDialog) {
             ProductDialog(
                 product = state.editingProduct,
+                categories = state.categories.map { it.name },
                 saving = state.busy,
                 onCancel = vm::closeProductDialog,
                 onSave = { body -> vm.saveProduct(body) },
+            )
+        }
+
+        if (state.showCategoriesDialog) {
+            CategoriesDialog(
+                categories = state.categories,
+                saving = state.busy,
+                onClose = vm::closeCategoriesDialog,
+                onCreate = vm::createCategory,
+                onRename = vm::renameCategory,
+                onDelete = vm::deleteCategory,
             )
         }
 
@@ -417,6 +428,7 @@ private fun ProductsTab(state: AdminState, vm: AdminViewModel) {
                                     name = product.name,
                                     description = product.description,
                                     priceCents = product.priceCents,
+                                    costCents = product.costCents,
                                     category = product.category,
                                     imageUrl = product.imageUrl,
                                     available = available,
@@ -426,6 +438,19 @@ private fun ProductsTab(state: AdminState, vm: AdminViewModel) {
                     )
                 }
             }
+        }
+
+        // Gestion des catégories (ajout / rename en cascade / suppression protégée).
+        OutlinedButton(
+            onClick = vm::openCategoriesDialog,
+            shape = RoundedCornerShape(50),
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .padding(16.dp),
+        ) {
+            Icon(Icons.Outlined.Sell, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(6.dp))
+            Text("Catégories")
         }
 
         OutlinedButton(
@@ -569,12 +594,167 @@ private fun ConversationRow(conversation: Conversation, onClick: () -> Unit) {
     }
 }
 
+/* ======================================================== catégories ==== */
+
+/**
+ * Gestion des catégories côté fournisseur : ajout, renommage en cascade
+ * (les produits suivent), suppression protégée (409 si encore utilisée).
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun CategoriesDialog(
+    categories: List<Category>,
+    saving: Boolean,
+    onClose: () -> Unit,
+    onCreate: (String) -> Unit,
+    onRename: (Long, String) -> Unit,
+    onDelete: (Category) -> Unit,
+) {
+    var newCategory by remember { mutableStateOf("") }
+    var editingId by remember { mutableStateOf<Long?>(null) }
+    var editName by remember { mutableStateOf("") }
+    var confirmingDelete by remember { mutableStateOf<Category?>(null) }
+
+    AlertDialog(
+        onDismissRequest = { if (!saving) onClose() },
+        title = { Text("Gérer les catégories") },
+        text = {
+            Column(
+                modifier = Modifier
+                    .verticalScroll(rememberScrollState())
+                    .padding(top = 4.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(
+                        value = newCategory,
+                        onValueChange = { newCategory = it.take(60) },
+                        label = { Text("Nouvelle catégorie") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    TextButton(
+                        onClick = {
+                            onCreate(newCategory.trim())
+                            newCategory = ""
+                        },
+                        enabled = newCategory.isNotBlank() && !saving,
+                    ) { Text("Ajouter") }
+                }
+
+                if (categories.isEmpty()) {
+                    Text(
+                        "Aucune catégorie pour l’instant.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+
+                categories.forEach { category ->
+                    if (editingId == category.id) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            OutlinedTextField(
+                                value = editName,
+                                onValueChange = { editName = it.take(60) },
+                                label = { Text("Nouveau nom") },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f),
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            IconButton(
+                                onClick = {
+                                    val trimmed = editName.trim()
+                                    if (trimmed.isNotBlank() && trimmed != category.name) {
+                                        onRename(category.id, trimmed)
+                                    }
+                                    editingId = null
+                                },
+                                enabled = editName.isNotBlank() && !saving,
+                            ) {
+                                Icon(Icons.Outlined.Check, contentDescription = "Valider")
+                            }
+                        }
+                    } else {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                category.name,
+                                style = MaterialTheme.typography.bodyMedium,
+                                modifier = Modifier.weight(1f),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Text(
+                                "${category.productsCount} produit(s)",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            IconButton(onClick = {
+                                editingId = category.id
+                                editName = category.name
+                            }) {
+                                Icon(
+                                    Icons.Outlined.Edit,
+                                    contentDescription = "Renommer ${category.name}",
+                                )
+                            }
+                            IconButton(onClick = { confirmingDelete = category }) {
+                                Icon(
+                                    Icons.Outlined.Delete,
+                                    contentDescription = "Supprimer ${category.name}",
+                                    tint = MaterialTheme.colorScheme.error,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onClose) { Text("Fermer") }
+        },
+    )
+
+    confirmingDelete?.let { category ->
+        AlertDialog(
+            onDismissRequest = { if (!saving) confirmingDelete = null },
+            title = { Text("Supprimer « ${category.name} » ?") },
+            text = {
+                Text(
+                    if (category.productsCount > 0) {
+                        "Cette catégorie est utilisée par ${category.productsCount} produit(s) : " +
+                            "le serveur refusera la suppression tant qu’il en reste."
+                    } else {
+                        "Elle disparaîtra de la liste des catégories."
+                    },
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onDelete(category)
+                        confirmingDelete = null
+                    },
+                    enabled = !saving,
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = MaterialTheme.colorScheme.error,
+                    ),
+                ) { Text("Supprimer") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmingDelete = null }) { Text("Annuler") }
+            },
+        )
+    }
+}
+
 /* ============================================================ formulaire === */
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ProductDialog(
     product: Product?,
+    categories: List<String>,
     saving: Boolean,
     onCancel: () -> Unit,
     onSave: (CreateProductBody) -> Unit,
@@ -585,20 +765,21 @@ private fun ProductDialog(
     var price by remember(product?.id) {
         mutableStateOf(product?.priceCents?.toPriceInput().orEmpty())
     }
+    var cost by remember(product?.id) {
+        mutableStateOf(product?.costCents?.toPriceInput().orEmpty())
+    }
     var imageUrl by remember(product?.id) { mutableStateOf(product?.imageUrl.orEmpty()) }
     var available by remember(product?.id) { mutableStateOf(product?.available ?: true) }
 
-    // Catégories proposées : liste figée + celle du produit si elle n'y figure pas.
-    val categories = remember(product?.id) {
+    // Catégories serveur (repli sur la liste par défaut) + celle du produit si elle n'y figure plus.
+    val catNames = remember(categories, product?.id) {
         val existing = product?.category.orEmpty()
-        Config.CATEGORIES + if (existing.isNotBlank() && existing !in Config.CATEGORIES) {
-            listOf(existing)
-        } else {
-            emptyList()
-        }
+        val base = categories.ifEmpty { Config.CATEGORIES }
+        (base + if (existing.isNotBlank() && existing !in base) listOf(existing) else emptyList())
     }
 
     val priceCents = price.eurosToCents()
+    val costCents = cost.eurosToCents() ?: 0
     val valid = name.isNotBlank() && category.isNotBlank() && priceCents != null
 
     AlertDialog(
@@ -633,7 +814,7 @@ private fun ProductDialog(
                         .horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    categories.forEach { cat ->
+                    catNames.forEach { cat ->
                         FilterChip(
                             selected = category == cat,
                             onClick = { category = cat },
@@ -644,10 +825,24 @@ private fun ProductDialog(
                 OutlinedTextField(
                     value = price,
                     onValueChange = { price = it.take(12) },
-                    label = { Text("Prix (€) *") },
+                    label = { Text("Prix de vente (€) *") },
                     isError = price.isNotBlank() && priceCents == null,
                     supportingText = {
                         Text(if (priceCents != null) "${priceCents.toPrice()}" else "Ex : 9,50")
+                    },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = cost,
+                    onValueChange = { cost = it.take(12) },
+                    label = { Text("Prix de revient (€)") },
+                    supportingText = {
+                        Text(
+                            if (costCents > 0) "${costCents.toPrice()} · marge ${((priceCents ?: 0) - costCents).toPrice()}"
+                            else "Sert au calcul de la marge",
+                        )
                     },
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
@@ -683,6 +878,7 @@ private fun ProductDialog(
                             name = name.trim(),
                             description = description.trim().ifBlank { null },
                             priceCents = cents,
+                            costCents = costCents,
                             category = category.trim(),
                             imageUrl = imageUrl.trim().ifBlank { null },
                             available = available,

@@ -91,19 +91,34 @@ conserve l'accès au chat, y compris s'il s'est connecté par nom.
 
 ```json
 { "id": 1, "name": "Pizza Margherita", "description": "Tomate, mozzarella, basilic",
-  "priceCents": 950, "category": "Pizza", "imageUrl": "https://...",
+  "priceCents": 950, "costCents": 400, "category": "Pizza", "imageUrl": "https://...",
   "available": true, "createdAt": "..." }
 ```
+`costCents` = prix de revient (coût d'achat) → sert à la marge dans l'espace Finances.
 
 ### `GET /api/products/:id` → `Product` ou 404.
 
 ### Fournisseur uniquement (403 sinon)
-- `POST /api/products` body `{ name, description, priceCents, category, imageUrl, available? }` → 201 `Product`
-  - validations : `name` requis (1–120), `priceCents` entier ≥ 0, `category` requis (1–60),
-    `description` ≤ 2000, `imageUrl` ≤ 500 (peut être vide → placeholder).
+- `POST /api/products` body `{ name, description, priceCents, costCents?, category, imageUrl, available? }` → 201 `Product`
+  - validations : `name` requis (1–120), `priceCents` entier ≥ 0, `costCents` entier ≥ 0 (défaut 0),
+    `category` requis (1–60), `description` ≤ 2000, `imageUrl` ≤ 500 (peut être vide → placeholder).
 - `PATCH /api/products/:id` (champs partiels, mêmes validations) → `Product`
 - `DELETE /api/products/:id` → 204. (Refus 409 si le produit apparaît dans une commande non livrée ?
   Non : on supprime seulement le produit, les `order_items` gardent une copie du nom/prix.)
+
+### Catégories
+
+Les chips de la galerie viennent de la table `categories` (seed : 10 catégories par défaut, une
+seule fois). Le fournisseur les gère depuis son espace.
+
+- `GET /api/categories` (public) → `{ "categories": [ { "id", "name", "createdAt", "productsCount" } ] }`
+  trié par nom.
+- Fournisseur uniquement (403 sinon) :
+  - `POST /api/categories` body `{ "name": string }` (1–60) → 201 ; 409 si déjà existante.
+  - `PATCH /api/categories/:id` body `{ "name": string }` → 200. **Renomme aussi les produits**
+    de l'ancien nom (transaction) pour ne pas casser les filtres ; 409 si le nouveau nom existe.
+  - `DELETE /api/categories/:id` → 204 ; **409 si encore utilisée** par des produits.
+- Émet en socket : `categories:changed` (toutes les connexions).
 
 ---
 
@@ -182,6 +197,7 @@ Côté client, à la connexion :
 | `order:deleted` | `{ id, customerId, mine? }` — commande purgée après 2 h | `user:<customerId>`, `admin` |
 | `conversation:deleted` | `{ conversationId }` — fil purgé avec la dernière commande | `conv:<id>`, `user:<customerId>`, `admin` |
 | `product:changed` | `{ action: "created"\|"updated"\|"deleted", product }` | toutes les connexions |
+| `categories:changed` | (sans payload) — liste des catégories à re-fetcher | toutes les connexions |
 
 Reconnexion automatique côté client (`reconnection: true`). Toute mutation REST émet aussi l'event
 correspondant (les sockets ne sont pas la seule source de vérité → l'app re-fait un GET après un
@@ -199,9 +215,47 @@ Toutes les 60 s (`ORDER_PURGE_INTERVAL_S`), le serveur supprime :
 Chaque suppression est diffusée en socket (`order:deleted`, `conversation:deleted`) pour que
 l'app du client et l'espace fournisseur se mettent à jour instantanément.
 
+**Le journal des ventes (`sales` / `sale_items`) n'est PAS purgé** : écrit à la livraison avec une
+copie figée des prix et des coûts, il survit à la suppression de la commande (voir §7 Finances).
+
 ---
 
-## 7. Santé & seed
+## 7. Espace Finances (fournisseur)
+
+Toutes les routes sont **fournisseur uniquement** (401 sans JWT, 403 sinon). Les montants sont en
+centimes. Les dates de période sont en `AAAA-MM-JJ` (paramètres `from` / `to`, optionnels,
+filtrent sur la date locale).
+
+### `GET /api/finances/summary?from=&to=`
+```json
+{ "period": { "from": null, "to": null },
+  "revenueCents": 4850, "costCents": 2100, "grossMarginCents": 2750,
+  "expensesCents": 12000, "netCents": -9250,
+  "orders": 3, "units": 7, "expenseCount": 1 }
+```
+- **Revenus** : somme des ventes livrées (table `sales`).
+- **Coûts** : `cost_cents × qty` des articles vendus (prix de revient figé à la livraison).
+- **Marge brute** = revenus − coûts ; **résultat net** = marge brute − dépenses.
+
+### `GET /api/finances/sales?from=&to=&limit=100` (max 500)
+→ `{ "sales": [ { "id", "orderId", "totalCents", "deliveredAt",
+  "items": [ { "productId", "name", "priceCents", "costCents", "qty" } ] } ] }`
+Plus récent d'abord. Survivent à la purge de 2 h des commandes.
+
+### `GET /api/finances/products?from=&to=`
+→ `{ "products": [ { "productId", "name", "units", "revenueCents", "costCents", "marginCents" } ] }`
+Revenus / coûts / marge **par produit**, triés par revenu décroissant.
+
+### Dépenses manuelles (charges du fournisseur)
+- `GET /api/finances/expenses` → `{ "expenses": [ { "id", "label", "amountCents", "date", "createdAt" } ] }`
+- `POST /api/finances/expenses` body `{ "label": string, "amountCents": int ≥ 0, "date?": "AAAA-MM-JJ" }`
+  → 201 (`date` défaut : aujourd'hui).
+- `PATCH /api/finances/expenses/:id` (champs partiels) → 200 ; 404 si introuvable.
+- `DELETE /api/finances/expenses/:id` → 204 ; 404 si déjà supprimée.
+
+---
+
+## 8. Santé & seed
 
 ### `GET /api/health` → `{ "ok": true, "version": "1.0.0" }`
 
@@ -211,7 +265,7 @@ des images `https://images.unsplash.com/...&w=600` et prix réalistes.
 
 ---
 
-## 8. Variables d'environnement (`.env`)
+## 9. Variables d'environnement (`.env`)
 
 | var | défaut | rôle |
 |---|---|---|
@@ -228,7 +282,7 @@ des images `https://images.unsplash.com/...&w=600` et prix réalistes.
 
 ---
 
-## 9. Choix techniques backend
+## 10. Choix techniques backend
 
 - Node.js ≥ 20, **ESM** (`"type": "module"`), Express 4, `better-sqlite3` (fichier `data/delivro.db`),
   `socket.io`, `jsonwebtoken`, `cookie-parser`, `dotenv`, `express-rate-limit`.

@@ -1,11 +1,19 @@
 package com.shoptabouffe.app.core
 
 import com.shoptabouffe.app.core.models.AuthResponse
+import com.shoptabouffe.app.core.models.CategoriesResponse
+import com.shoptabouffe.app.core.models.Category
+import com.shoptabouffe.app.core.models.CategoryBody
 import com.shoptabouffe.app.core.models.CodeBody
 import com.shoptabouffe.app.core.models.ConversationsResponse
+import com.shoptabouffe.app.core.models.CreateExpenseBody
 import com.shoptabouffe.app.core.models.CreateOrderBody
 import com.shoptabouffe.app.core.models.CreateProductBody
 import com.shoptabouffe.app.core.models.ErrorBody
+import com.shoptabouffe.app.core.models.Expense
+import com.shoptabouffe.app.core.models.ExpensesResponse
+import com.shoptabouffe.app.core.models.FinanceProductsResponse
+import com.shoptabouffe.app.core.models.FinanceSummary
 import com.shoptabouffe.app.core.models.HealthResponse
 import com.shoptabouffe.app.core.models.Message
 import com.shoptabouffe.app.core.models.MessageBody
@@ -15,6 +23,7 @@ import com.shoptabouffe.app.core.models.Order
 import com.shoptabouffe.app.core.models.OrdersResponse
 import com.shoptabouffe.app.core.models.Product
 import com.shoptabouffe.app.core.models.ProductsResponse
+import com.shoptabouffe.app.core.models.SalesResponse
 import com.shoptabouffe.app.core.models.StatusBody
 import com.shoptabouffe.app.core.models.UploadResponse
 import com.shoptabouffe.app.core.models.User
@@ -90,6 +99,19 @@ interface ShopTaBouffeApi {
     @DELETE("products/{id}")
     suspend fun deleteProduct(@Path("id") id: Long)
 
+    // --- catégories -------------------------------------------------------
+    @GET("categories")
+    suspend fun categories(): CategoriesResponse
+
+    @POST("categories")
+    suspend fun createCategory(@Body body: CategoryBody): Category
+
+    @PATCH("categories/{id}")
+    suspend fun updateCategory(@Path("id") id: Long, @Body body: CategoryBody): Category
+
+    @DELETE("categories/{id}")
+    suspend fun deleteCategory(@Path("id") id: Long)
+
     /** Photo de produit depuis la galerie (multipart, champ « image »). */
     @Multipart
     @POST("uploads/product-image")
@@ -127,6 +149,35 @@ interface ShopTaBouffeApi {
 
     @POST("conversations/{id}/read")
     suspend fun markRead(@Path("id") id: Long)
+
+    // --- finances (fournisseur) ------------------------------------------
+    @GET("finances/summary")
+    suspend fun financeSummary(
+        @Query("from") from: String? = null,
+        @Query("to") to: String? = null,
+    ): FinanceSummary
+
+    @GET("finances/sales")
+    suspend fun financeSales(
+        @Query("from") from: String? = null,
+        @Query("to") to: String? = null,
+        @Query("limit") limit: Int? = null,
+    ): SalesResponse
+
+    @GET("finances/products")
+    suspend fun financeProducts(
+        @Query("from") from: String? = null,
+        @Query("to") to: String? = null,
+    ): FinanceProductsResponse
+
+    @GET("finances/expenses")
+    suspend fun expenses(): ExpensesResponse
+
+    @POST("finances/expenses")
+    suspend fun createExpense(@Body body: CreateExpenseBody): Expense
+
+    @DELETE("finances/expenses/{id}")
+    suspend fun deleteExpense(@Path("id") id: Long)
 }
 
 object Api {

@@ -15,11 +15,12 @@ object Config {
     /** Construit une URL d'API : api("products") → http://host/api/products */
     fun api(path: String): String = API_URL + path.trimStart('/')
 
-    val PROVIDERS = listOf("github", "google")
+    /** Ordre d'affichage sur la page de connexion : Google, puis GitHub. */
+    val PROVIDERS = listOf("google", "github")
 
     /**
-     * Catégories proposées au vendeur à l'ajout d'un produit (liste figée :
-     * on ne tape plus un nom de catégorie à chaque fois).
+     * Catégories par défaut (repli si la table `categories` du serveur est
+     * indisponible) : on ne tape plus un nom de catégorie à chaque fois.
      */
     val CATEGORIES = listOf(
         "Pizza",

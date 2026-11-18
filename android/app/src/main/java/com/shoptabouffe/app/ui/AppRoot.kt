@@ -135,14 +135,6 @@ private fun UpdateDialog(vm: MainViewModel) {
 @Composable
 private fun SplashScreen() {
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text("ShopTaBouffe", style = MaterialTheme.typography.headlineLarge, color = Orange)
-            Spacer(Modifier.height(4.dp))
-            Text(
-                "La livraison, en un geste",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
+        Text("ShopTaBouffe", style = MaterialTheme.typography.headlineLarge, color = Orange)
     }
 }

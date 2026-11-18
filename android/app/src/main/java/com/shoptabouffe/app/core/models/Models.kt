@@ -24,6 +24,7 @@ data class Product(
     val name: String = "",
     val description: String? = null,
     val priceCents: Int = 0,
+    val costCents: Int = 0,
     val category: String = "",
     @SerializedName("imageUrl") val imageUrl: String? = null,
     val available: Boolean = true,
@@ -95,9 +96,85 @@ data class CreateProductBody(
     val name: String,
     val description: String?,
     val priceCents: Int,
+    val costCents: Int,
     val category: String,
     val imageUrl: String?,
     val available: Boolean,
+)
+
+/* ---------------------------------------------------------- catégories --- */
+
+data class Category(
+    val id: Long = 0,
+    val name: String = "",
+    val createdAt: String? = null,
+    val productsCount: Int = 0,
+)
+
+data class CategoriesResponse(val categories: List<Category> = emptyList())
+
+data class CategoryBody(val name: String)
+
+/* ----------------------------------------------------------- finances --- */
+
+data class Period(val from: String? = null, val to: String? = null)
+
+/** GET /api/finances/summary — revenus, coûts, marges, dépenses, résultat net. */
+data class FinanceSummary(
+    val period: Period? = null,
+    val revenueCents: Int = 0,
+    val costCents: Int = 0,
+    val grossMarginCents: Int = 0,
+    val expensesCents: Int = 0,
+    val netCents: Int = 0,
+    val orders: Int = 0,
+    val units: Int = 0,
+    val expenseCount: Int = 0,
+)
+
+data class SaleItem(
+    val productId: Long? = null,
+    val name: String = "",
+    val priceCents: Int = 0,
+    val costCents: Int = 0,
+    val qty: Int = 1,
+)
+
+data class Sale(
+    val id: Long = 0,
+    val orderId: Long = 0,
+    val totalCents: Int = 0,
+    val deliveredAt: String? = null,
+    val items: List<SaleItem> = emptyList(),
+)
+
+data class SalesResponse(val sales: List<Sale> = emptyList())
+
+data class FinanceProduct(
+    val productId: Long? = null,
+    val name: String = "",
+    val units: Int = 0,
+    val revenueCents: Int = 0,
+    val costCents: Int = 0,
+    val marginCents: Int = 0,
+)
+
+data class FinanceProductsResponse(val products: List<FinanceProduct> = emptyList())
+
+data class Expense(
+    val id: Long = 0,
+    val label: String = "",
+    val amountCents: Int = 0,
+    val date: String? = null,
+    val createdAt: String? = null,
+)
+
+data class ExpensesResponse(val expenses: List<Expense> = emptyList())
+
+data class CreateExpenseBody(
+    val label: String,
+    val amountCents: Int,
+    val date: String? = null,
 )
 
 data class StatusBody(val status: String)

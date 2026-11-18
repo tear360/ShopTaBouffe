@@ -15,7 +15,9 @@ backend/uploads/
 # sorties
 *.apk
 *.aab
+*.exe
 .DS_Store
+windows/dist/
 
 # signature release (clé privée : jamais sur GitHub)
 android/keystore/

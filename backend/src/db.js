@@ -37,6 +37,12 @@ CREATE TABLE IF NOT EXISTS admin_codes (
   active INTEGER NOT NULL DEFAULT 1
 );
 
+CREATE TABLE IF NOT EXISTS categories (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  name       TEXT NOT NULL UNIQUE,
+  created_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS products (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   name        TEXT NOT NULL,
@@ -88,7 +94,57 @@ CREATE TABLE IF NOT EXISTS messages (
 );
 
 CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id, id);
+
+-- Espace Finances (fournisseur) --------------------------------------------
+-- Journal des ventes : écrit à la livraison, SURVIT à la purge de 2 h des commandes.
+CREATE TABLE IF NOT EXISTS sales (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  order_id     INTEGER NOT NULL,
+  total_cents  INTEGER NOT NULL,
+  delivered_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS sale_items (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  sale_id     INTEGER NOT NULL REFERENCES sales(id) ON DELETE CASCADE,
+  product_id  INTEGER,
+  name        TEXT NOT NULL,
+  price_cents INTEGER NOT NULL,
+  cost_cents  INTEGER NOT NULL DEFAULT 0,
+  qty         INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_sale_items_sale ON sale_items(sale_id);
+
+-- Une seule ligne de vente par commande (transition delivered unique).
+CREATE UNIQUE INDEX IF NOT EXISTS idx_sales_order ON sales(order_id);
+
+-- Dépenses manuelles du fournisseur (charges, achats divers…)
+CREATE TABLE IF NOT EXISTS expenses (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  label        TEXT NOT NULL,
+  amount_cents INTEGER NOT NULL,
+  date         TEXT NOT NULL,
+  created_at   TEXT NOT NULL
+);
 `);
+
+// Migration : prix de revient sur les produits (coût d'achat → marge).
+const productCols = db.prepare('PRAGMA table_info(products)').all();
+if (!productCols.some((c) => c.name === 'cost_cents')) {
+  db.exec('ALTER TABLE products ADD COLUMN cost_cents INTEGER NOT NULL DEFAULT 0');
+}
+
+// Seed des catégories (une seule fois, pas au redémarrage après suppression).
+if (!db.prepare("SELECT value FROM settings WHERE key = 'categories_seeded'").get()) {
+  const insertCat = db.prepare('INSERT OR IGNORE INTO categories (name, created_at) VALUES (?, ?)');
+  const ts = new Date().toISOString();
+  for (const name of [
+    'Pizza', 'Burger', 'Sushi', 'Dessert', 'Boisson',
+    'Sandwich', 'Salade', 'Snack', 'Plat', 'Épicerie',
+  ]) insertCat.run(name, ts);
+  db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('categories_seeded', '1')").run();
+}
 
 /** Prépare le secret JWT persisté (au 1er lancement, si JWT_SECRET absent). */
 export function ensureReady() {
@@ -126,6 +182,7 @@ export function toProduct(row) {
     name: row.name,
     description: row.description ?? '',
     priceCents: row.price_cents,
+    costCents: row.cost_cents ?? 0,
     category: row.category,
     imageUrl: row.image_url ?? '',
     available: !!row.available,

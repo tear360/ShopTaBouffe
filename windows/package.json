@@ -1,0 +1,18 @@
+{
+  "name": "shoptabouffe",
+  "productName": "ShopTaBouffe",
+  "version": "1.0.3",
+  "description": "ShopTaBouffe — commandez chez vos commerçants locaux",
+  "main": "main.js",
+  "author": "tear360",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-packager . ShopTaBouffe --platform=win32 --arch=x64 --out=dist --overwrite --icon=icon.ico --app-version=1.0.3"
+  },
+  "devDependencies": {
+    "electron": "45.3.4",
+    "@electron/packager": "18.3.6"
+  }
+}
