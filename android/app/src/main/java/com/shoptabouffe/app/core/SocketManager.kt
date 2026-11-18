@@ -25,6 +25,8 @@ object SocketManager {
         "message:new",
         "order:new",
         "order:updated",
+        "order:deleted",
+        "conversation:deleted",
         "product:changed",
     )
 

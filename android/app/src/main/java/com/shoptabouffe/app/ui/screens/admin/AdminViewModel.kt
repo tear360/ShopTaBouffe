@@ -60,8 +60,10 @@ class AdminViewModel(app: Application) : AndroidViewModel(app) {
         unsubscribes = listOfNotNull(
             SocketManager.on("order:new") { loadOrders(refreshing = true) },
             SocketManager.on("order:updated") { loadOrders(refreshing = true) },
+            SocketManager.on("order:deleted") { loadOrders(refreshing = true) },
             SocketManager.on("product:changed") { loadProducts() },
             SocketManager.on("message:new") { loadConversations() },
+            SocketManager.on("conversation:deleted") { loadConversations() },
         )
     }
 

@@ -2,13 +2,13 @@
 
 Application Android (Kotlin + Jetpack Compose) de commande et de livraison, avec un backend
 Node.js temps réel : catalogue, panier, commandes, **chat client ↔ fournisseur en direct**,
-comptes sociaux **Discord / GitHub / Google**.
+comptes sociaux **GitHub / Google** (plus une connexion par nom, sans compte).
 
 ```
 delivro/
 ├── android/          App Android (Kotlin, Jetpack Compose, Min SDK 24)
 ├── backend/          API REST + Socket.IO + SQLite (Node.js 20+, ESM)
-└── docs/             API.md (contrat) · OAUTH_SETUP.md (branchement des 3 réseaux)
+└── docs/             API.md (contrat) · OAUTH_SETUP.md (branchement GitHub / Google)
 ```
 
 ---
@@ -16,8 +16,9 @@ delivro/
 ## Fonctionnalités
 
 **Client**
-- Connexion en **1 clic** avec Discord, GitHub ou Google (Custom Tab → retour en deep link
-  `shoptabouffe://auth?token=…`), plus un **mode démo** sans compte.
+- Connexion en **1 clic** avec GitHub ou Google (Custom Tab → retour en deep link
+  `shoptabouffe://auth?token=…`), ou **connexion par nom** sans compte.
+  ⚠️ Un compte créé par nom est **exclu du chat fournisseur** (par sécurité).
 - Galerie de produits : recherche, filtres par catégorie, fiche produit, quantités.
 - Panier persistant pendant la session, commande avec adresse / téléphone / note.
 - Suivi des commandes (statuts : en attente → acceptée → préparation → livraison → livrée,
@@ -83,9 +84,9 @@ delivro.apiUrl=http://10.0.2.2:3000     # émulateur (défaut)
 
 | Besoin | Étapes |
 |---|---|
-| Client rapide | Écran de connexion → *Essayer sans compte (mode démo)* |
+| Client rapide | Écran de connexion → saisir un nom → *Se connecter avec ce nom* |
 | Fournisseur | Même chose, puis **Profil → Espace fournisseur → code `SUPPLIER-2026`** |
-| Connexion sociale | Créer les 3 apps OAuth : [docs/OAUTH_SETUP.md](docs/OAUTH_SETUP.md) |
+| Connexion sociale | Créer les apps OAuth : [docs/OAUTH_SETUP.md](docs/OAUTH_SETUP.md) |
 
 Un compte devenu fournisseur gagne instantanément l'onglet *Fournisseur* dans la barre
 inférieure (mise à jour en direct via le profil).

@@ -32,6 +32,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     private var conversationId: Long? = null
     private var unsubscribe: (() -> Unit)? = null
+    private var unsubscribeDeleted: (() -> Unit)? = null
 
     fun open(id: Long) {
         if (conversationId == id && _state.value.conversation != null) return
@@ -50,6 +51,16 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                     _state.value = current.copy(messages = current.messages + incoming)
                     // l'utilisateur est sur l'écran : on accuse réception
                     markRead()
+                }
+            }
+            // Fil supprimé (commande terminée purgée après 2 h) : on le signale à l'utilisateur.
+            unsubscribeDeleted = SocketManager.on("conversation:deleted") { payload ->
+                val id = payload?.optLong("conversationId", -1L) ?: -1L
+                if (id == conversationId) {
+                    _state.value = _state.value.copy(
+                        loading = false,
+                        error = "Cette discussion a été supprimée (commande terminée).",
+                    )
                 }
             }
         }
@@ -121,6 +132,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     override fun onCleared() {
         unsubscribe?.invoke()
+        unsubscribeDeleted?.invoke()
         super.onCleared()
     }
 }

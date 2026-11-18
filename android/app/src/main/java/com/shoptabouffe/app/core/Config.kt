@@ -15,13 +15,29 @@ object Config {
     /** Construit une URL d'API : api("products") → http://host/api/products */
     fun api(path: String): String = API_URL + path.trimStart('/')
 
-    val PROVIDERS = listOf("discord", "github", "google")
+    val PROVIDERS = listOf("github", "google")
+
+    /**
+     * Catégories proposées au vendeur à l'ajout d'un produit (liste figée :
+     * on ne tape plus un nom de catégorie à chaque fois).
+     */
+    val CATEGORIES = listOf(
+        "Pizza",
+        "Burger",
+        "Sushi",
+        "Dessert",
+        "Boisson",
+        "Sandwich",
+        "Salade",
+        "Snack",
+        "Plat",
+        "Épicerie",
+    )
 
     fun providerLabel(provider: String): String = when (provider) {
-        "discord" -> "Discord"
         "github" -> "GitHub"
         "google" -> "Google"
-        "demo" -> "Démo"
+        "demo" -> "Invité"
         else -> provider.replaceFirstChar { it.uppercase() }
     }
 }

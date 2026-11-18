@@ -12,6 +12,7 @@ import productRoutes from './routes/products.js';
 import orderRoutes from './routes/orders.js';
 import conversationRoutes from './routes/conversations.js';
 import uploadRoutes, { UPLOAD_DIR } from './routes/uploads.js';
+import { startCleanup } from './cleanup.js';
 
 const PORT = Number(process.env.PORT || 3000);
 const VERSION = '1.0.0';
@@ -72,6 +73,7 @@ app.set('io', getIO());
 
 server.listen(PORT, () => {
   console.log(`[server] Delivro API v${VERSION} — http://localhost:${PORT}/api (seed: ${seeded} produits)`);
+  startCleanup();
 });
 
 function shutdown(signal) {

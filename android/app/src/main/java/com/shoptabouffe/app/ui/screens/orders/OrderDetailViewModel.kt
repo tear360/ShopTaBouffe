@@ -28,6 +28,7 @@ class OrderDetailViewModel(app: Application) : AndroidViewModel(app) {
 
     private var loadedId: Long? = null
     private var unsubscribe: (() -> Unit)? = null
+    private var unsubscribeDeleted: (() -> Unit)? = null
 
     fun load(orderId: Long, force: Boolean = false) {
         if (loadedId == orderId && _state.value.order != null && !force) return
@@ -37,6 +38,17 @@ class OrderDetailViewModel(app: Application) : AndroidViewModel(app) {
             unsubscribe = SocketManager.on("order:updated") { payload ->
                 val id = payload?.optLong("id", -1L) ?: -1L
                 if (id == loadedId) refresh()
+            }
+            // Commande purgée après 2 h (terminée) : on l'affiche plus comme disponible.
+            unsubscribeDeleted = SocketManager.on("order:deleted") { payload ->
+                val id = payload?.optLong("id", -1L) ?: -1L
+                if (id == loadedId) {
+                    _state.value = _state.value.copy(
+                        loading = false,
+                        order = null,
+                        error = "Commande expirée : elle est supprimée automatiquement 2 h après sa livraison.",
+                    )
+                }
             }
         }
 
@@ -99,6 +111,7 @@ class OrderDetailViewModel(app: Application) : AndroidViewModel(app) {
 
     override fun onCleared() {
         unsubscribe?.invoke()
+        unsubscribeDeleted?.invoke()
         super.onCleared()
     }
 }

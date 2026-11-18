@@ -67,6 +67,7 @@ private val STEPS = listOf(
 @Composable
 fun OrderDetailScreen(
     orderId: Long,
+    canChat: Boolean = true,
     onBack: () -> Unit,
     onOpenChat: (Long) -> Unit,
 ) {
@@ -101,6 +102,7 @@ fun OrderDetailScreen(
 
                 currentOrder != null -> OrderContent(
                     order = currentOrder,
+                    canChat = canChat,
                     conversationLoading = state.conversationLoading,
                     onOpenChat = { vm.openConversation(onOpenChat) },
                 )
@@ -128,6 +130,7 @@ fun OrderDetailScreen(
 @Composable
 private fun OrderContent(
     order: Order,
+    canChat: Boolean,
     conversationLoading: Boolean,
     onOpenChat: () -> Unit,
 ) {
@@ -223,14 +226,16 @@ private fun OrderContent(
             }
         }
 
-        item {
-            PrimaryButton(
-                text = "Discuter avec le fournisseur",
-                onClick = onOpenChat,
-                loading = conversationLoading,
-                icon = Icons.AutoMirrored.Outlined.Chat,
-                modifier = Modifier.fillMaxWidth(),
-            )
+        if (canChat) {
+            item {
+                PrimaryButton(
+                    text = "Discuter avec le fournisseur",
+                    onClick = onOpenChat,
+                    loading = conversationLoading,
+                    icon = Icons.AutoMirrored.Outlined.Chat,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
         }
     }
 }

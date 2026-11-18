@@ -44,7 +44,7 @@ function upsertOAuthUser(provider, profile) {
   return db.prepare('SELECT * FROM users WHERE id = ?').get(info.lastInsertRowid);
 }
 
-/** GET /api/auth/start?provider=discord|github|google */
+/** GET /api/auth/start?provider=github|google */
 router.get('/start', (req, res) => {
   const provider = String(req.query.provider || '');
   const conf = PROVIDERS[provider];

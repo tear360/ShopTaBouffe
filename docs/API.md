@@ -19,12 +19,11 @@ Erreurs : `{ "error": "message lisible" }` avec le bon code HTTP (400 / 401 / 40
 Principe : l'app ouvre un Custom Tab sur `PUBLIC_URL/api/auth/start?provider=X`, le backend fait le
 cycle authorization_code côté serveur (client_secret), puis redirige vers le deep link de l'app.
 
-### `GET /api/auth/start?provider=discord|github|google`
+### `GET /api/auth/start?provider=github|google`
 - Génère `state` aléatoire (32 hex), le stocke en mémoire avec TTL 10 min (Map + cleanup), associe
   `provider`, et pose le cookie `oauth_state=<state>; HttpOnly; SameSite=Lax; Max-Age=600`.
 - 302 vers l'URL d'autorisation du fournisseur avec `client_id`, `redirect_uri={PUBLIC_URL}/api/auth/{provider}/callback`,
   `scope`, `state`, `response_type=code`.
-  - discord : `https://discord.com/api/oauth2/authorize`, scope `identify email`, prompt=none non requis
   - github : `https://github.com/login/oauth/authorize`, scope `read:user user:email`
   - google : `https://accounts.google.com/o/oauth2/v2/auth`, scope `openid email profile`, `access_type=offline`, `prompt=select_account`
 - Si `client_id`/`client_secret` manquants pour ce provider → 302 vers
@@ -35,9 +34,6 @@ cycle authorization_code côté serveur (client_secret), puis redirige vers le d
 - Vérifie `state` (cookie + mémoire, une seule consommation) → sinon redirect erreur `state_mismatch`.
 - Échange `code` contre le token (POST token endpoint, `redirect_uri` identique, `client_id`/`secret`),
   récupère le profil :
-  - discord : `GET https://discord.com/api/users/@me` → `id`, `username`, `global_name`, `email`, `avatar`
-    (avatar URL : `https://cdn.discordapp.com/avatars/{id}/{avatar}.png?size=128`, fallback identicon
-    `https://cdn.discordapp.com/embed/avatars/0.png` si `avatar` null)
   - github : `GET https://api.github.com/user` (+ `GET https://api.github.com/user/emails` si email null)
     → `id`, `login`, `name`, `email`, `avatar_url`
   - google : `GET https://openidconnect.googleapis.com/v1/userinfo` → `sub`, `name`, `email`, `picture`
@@ -49,10 +45,16 @@ cycle authorization_code côté serveur (client_secret), puis redirige vers le d
 - Échec quelconque → 302 vers `shoptabouffe://auth?error=<code>` (`not_configured`, `state_mismatch`,
   `provider_error`, `missing_code`).
 
-### `POST /api/auth/demo` — body `{ "name": string }`
-Login de développement (permet de tester sans clés OAuth). Crée/réutilise un user
-`provider='demo'`, `provider_id='demo:<slug name>'`, rôle `customer`.
+### `POST /api/auth/demo` — body `{ "name": string }` — connexion par nom (compte invité)
+Login sans compte ni mot de passe (champ « Votre nom » de l'écran de connexion). Crée/réutilise
+un user `provider='demo'`, `provider_id='demo:<slug name>'`, rôle `customer`.
 Réponse 200 : objet `AuthResponse` (voir §1.1). Désactivable via `ALLOW_DEMO_LOGIN=false`.
+
+⚠️ **Sécurité : un compte invité n'a pas accès au chat.** Toutes les routes `/api/conversations*`
+renvoient `403 { error, code: 'chat_forbidden' }` et le socket `conversation:join` renvoie
+`{ status: 'error', error: 'chat_forbidden' }` pour `provider === 'demo'`.
+Exception : un compte devenu **fournisseur** (`role = 'supplier'`, via le code fournisseur)
+conserve l'accès au chat, y compris s'il s'est connecté par nom.
 
 ### `GET /api/auth/me` → 200 `User`
 ```json
@@ -177,11 +179,25 @@ Côté client, à la connexion :
 | `message:new` | `{ id, conversationId, senderId, senderName, body, createdAt, readAt }` | `conv:<id>` |
 | `order:new` | `Order` (avec `customer`) | `admin` |
 | `order:updated` | `Order` (avec `customer` si supplier) | `user:<customerId>`, `admin` |
+| `order:deleted` | `{ id, customerId, mine? }` — commande purgée après 2 h | `user:<customerId>`, `admin` |
+| `conversation:deleted` | `{ conversationId }` — fil purgé avec la dernière commande | `conv:<id>`, `user:<customerId>`, `admin` |
 | `product:changed` | `{ action: "created"\|"updated"\|"deleted", product }` | toutes les connexions |
 
 Reconnexion automatique côté client (`reconnection: true`). Toute mutation REST émet aussi l'event
 correspondant (les sockets ne sont pas la seule source de vérité → l'app re-fait un GET après un
 événement pour rester cohérent).
+
+### Purge automatique des commandes terminées
+
+Toutes les 60 s (`ORDER_PURGE_INTERVAL_S`), le serveur supprime :
+
+1. les commandes `delivered` ou `refused` dont le `updated_at` a plus de **2 h**
+   (`ORDER_RETENTION_HOURS`) — les lignes d'articles partent en cascade ;
+2. **ensuite**, la conversation du client **si** il ne lui reste plus aucune commande en cours
+   (sinon le fil est conservé : il sert encore) — les messages partent en cascade.
+
+Chaque suppression est diffusée en socket (`order:deleted`, `conversation:deleted`) pour que
+l'app du client et l'espace fournisseur se mettent à jour instantanément.
 
 ---
 
@@ -201,11 +217,12 @@ des images `https://images.unsplash.com/...&w=600` et prix réalistes.
 |---|---|---|
 | `PORT` | `3000` | port HTTP |
 | `PUBLIC_URL` | `http://10.0.2.2:3000` | URL publique (callbacks OAuth + socket) |
-| `APP_REDIRECT_SCHEME` | `delivro` | schéma du deep link de retour |
+| `APP_REDIRECT_SCHEME` | `shoptabouffe` | schéma du deep link de retour |
 | `JWT_SECRET` | aléatoire au 1er lancement (persisté dans la DB) | signature JWT |
 | `ADMIN_CODE` | `SUPPLIER-2026` | code fournisseur |
-| `ALLOW_DEMO_LOGIN` | `true` | active `POST /api/auth/demo` |
-| `DISCORD_CLIENT_ID` / `DISCORD_CLIENT_SECRET` | — | OAuth Discord |
+| `ALLOW_DEMO_LOGIN` | `true` | active `POST /api/auth/demo` (connexion par nom, sans chat) |
+| `ORDER_RETENTION_HOURS` | `2` | purge des commandes terminées après ce délai |
+| `ORDER_PURGE_INTERVAL_S` | `60` | fréquence du tour de purge |
 | `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | — | OAuth GitHub |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | — | OAuth Google |
 

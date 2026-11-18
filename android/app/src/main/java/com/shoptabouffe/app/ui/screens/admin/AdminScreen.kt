@@ -74,6 +74,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.launch
 import com.shoptabouffe.app.core.Api
 import com.shoptabouffe.app.core.ApiResult
+import com.shoptabouffe.app.core.Config
 import com.shoptabouffe.app.core.models.Conversation
 import com.shoptabouffe.app.core.models.CreateProductBody
 import com.shoptabouffe.app.core.models.Order
@@ -84,7 +85,6 @@ import com.shoptabouffe.app.core.toPriceInput
 import com.shoptabouffe.app.core.toShortDateTime
 import com.shoptabouffe.app.core.eurosToCents
 import com.shoptabouffe.app.ui.components.Avatar
-import com.shoptabouffe.app.ui.components.ShopTaBouffeTopBar
 import com.shoptabouffe.app.ui.components.EmptyState
 import com.shoptabouffe.app.ui.components.ErrorState
 import com.shoptabouffe.app.ui.components.LoadingBox
@@ -114,51 +114,48 @@ fun AdminScreen(onOpenChat: (Long) -> Unit) {
 
     Box(modifier = Modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxSize()) {
-            ShopTaBouffeTopBar(
-                title = "Espace fournisseur",
-                subtitle = when {
-                    state.pendingCount > 0 -> "${state.pendingCount} commande(s) à traiter"
-                    else -> "${state.orders.size} commande(s) au total"
-                },
-                actions = {
-                    IconButton(onClick = { vm.loadAll() }) {
-                        Icon(Icons.Outlined.Refresh, contentDescription = "Rafraîchir")
-                    }
-                },
-            )
-
-            TabRow(selectedTabIndex = state.tab) {
-                Tab(
-                    selected = state.tab == 0,
-                    onClick = { vm.setTab(0) },
-                    text = {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("Commandes")
-                            if (state.pendingCount > 0) {
-                                Spacer(Modifier.width(6.dp))
-                                Badge { Text(state.pendingCount.toString()) }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TabRow(selectedTabIndex = state.tab, modifier = Modifier.weight(1f)) {
+                    Tab(
+                        selected = state.tab == 0,
+                        onClick = { vm.setTab(0) },
+                        text = {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("Commandes")
+                                if (state.pendingCount > 0) {
+                                    Spacer(Modifier.width(6.dp))
+                                    Badge { Text(state.pendingCount.toString()) }
+                                }
                             }
-                        }
-                    },
-                )
-                Tab(
-                    selected = state.tab == 1,
-                    onClick = { vm.setTab(1) },
-                    text = { Text("Produits") },
-                )
-                Tab(
-                    selected = state.tab == 2,
-                    onClick = { vm.setTab(2) },
-                    text = {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("Messages")
-                            if (state.unreadTotal > 0) {
-                                Spacer(Modifier.width(6.dp))
-                                Badge { Text(state.unreadTotal.toString()) }
+                        },
+                    )
+                    Tab(
+                        selected = state.tab == 1,
+                        onClick = { vm.setTab(1) },
+                        text = { Text("Produits") },
+                    )
+                    Tab(
+                        selected = state.tab == 2,
+                        onClick = { vm.setTab(2) },
+                        text = {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("Messages")
+                                if (state.unreadTotal > 0) {
+                                    Spacer(Modifier.width(6.dp))
+                                    Badge { Text(state.unreadTotal.toString()) }
+                                }
                             }
-                        }
-                    },
-                )
+                        },
+                    )
+                }
+                IconButton(onClick = { vm.loadAll() }) {
+                    Icon(Icons.Outlined.Refresh, contentDescription = "Rafraîchir")
+                }
             }
 
             when (state.tab) {
@@ -591,6 +588,16 @@ private fun ProductDialog(
     var imageUrl by remember(product?.id) { mutableStateOf(product?.imageUrl.orEmpty()) }
     var available by remember(product?.id) { mutableStateOf(product?.available ?: true) }
 
+    // Catégories proposées : liste figée + celle du produit si elle n'y figure pas.
+    val categories = remember(product?.id) {
+        val existing = product?.category.orEmpty()
+        Config.CATEGORIES + if (existing.isNotBlank() && existing !in Config.CATEGORIES) {
+            listOf(existing)
+        } else {
+            emptyList()
+        }
+    }
+
     val priceCents = price.eurosToCents()
     val valid = name.isNotBlank() && category.isNotBlank() && priceCents != null
 
@@ -619,13 +626,21 @@ private fun ProductDialog(
                     maxLines = 4,
                     modifier = Modifier.fillMaxWidth(),
                 )
-                OutlinedTextField(
-                    value = category,
-                    onValueChange = { category = it.take(60) },
-                    label = { Text("Catégorie *") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
+                Text("Catégorie *", style = MaterialTheme.typography.labelLarge)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    categories.forEach { cat ->
+                        FilterChip(
+                            selected = category == cat,
+                            onClick = { category = cat },
+                            label = { Text(cat) },
+                        )
+                    }
+                }
                 OutlinedTextField(
                     value = price,
                     onValueChange = { price = it.take(12) },

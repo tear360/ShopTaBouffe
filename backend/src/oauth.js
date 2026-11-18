@@ -42,56 +42,6 @@ function authorizeUrl(baseUrl, params) {
 
 // --- fournisseurs ---
 export const PROVIDERS = {
-  discord: {
-    id: 'discord',
-    clientId: () => env('DISCORD_CLIENT_ID'),
-    clientSecret: () => env('DISCORD_CLIENT_SECRET'),
-    scope: 'identify email',
-    authorize(state) {
-      return authorizeUrl('https://discord.com/api/oauth2/authorize', {
-        client_id: this.clientId(),
-        redirect_uri: redirectUri('discord'),
-        response_type: 'code',
-        scope: this.scope,
-        state,
-      });
-    },
-    async exchange(code) {
-      const res = await fetch('https://discord.com/api/oauth2/token', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({
-          client_id: this.clientId(),
-          client_secret: this.clientSecret(),
-          grant_type: 'authorization_code',
-          code,
-          redirect_uri: redirectUri('discord'),
-          scope: this.scope,
-        }).toString(),
-      });
-      if (!res.ok) throw new Error(`discord token ${res.status}`);
-      const data = await res.json();
-      if (!data.access_token) throw new Error('discord: access_token manquant');
-      return data.access_token;
-    },
-    async getProfile(token) {
-      const res = await fetch('https://discord.com/api/users/@me', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) throw new Error(`discord profile ${res.status}`);
-      const d = await res.json();
-      const avatarUrl = d.avatar
-        ? `https://cdn.discordapp.com/avatars/${d.id}/${d.avatar}.png?size=128`
-        : 'https://cdn.discordapp.com/embed/avatars/0.png';
-      return {
-        providerId: String(d.id),
-        name: d.global_name || d.username || '',
-        email: d.email ?? null,
-        avatarUrl,
-      };
-    },
-  },
-
   github: {
     id: 'github',
     clientId: () => env('GITHUB_CLIENT_ID'),

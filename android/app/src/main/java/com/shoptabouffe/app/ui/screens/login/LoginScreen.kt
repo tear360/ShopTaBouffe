@@ -21,7 +21,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.outlined.Info
@@ -66,7 +65,6 @@ private data class Brand(
 )
 
 private fun brandOf(provider: String): Brand = when (provider) {
-    "discord" -> Brand(Color(0xFF5865F2), Color.White, Icons.AutoMirrored.Filled.Chat, Color.White)
     "github" -> Brand(GlassSurfaceStrong, Color(0xFFF3F4F8), Icons.Filled.Code, Color.White)
     else -> Brand(Color.White, Color(0xFF1F1A17), Icons.Filled.Language, Color(0xFF4285F4))
 }
@@ -163,7 +161,8 @@ fun LoginScreen(vm: MainViewModel) {
         OutlinedTextField(
             value = name,
             onValueChange = { name = it.take(40) },
-            label = { Text("Votre prénom") },
+            label = { Text("Votre nom") },
+            placeholder = { Text("Ex. Léa") },
             singleLine = true,
             shape = RoundedCornerShape(14.dp),
             keyboardOptions = KeyboardOptions(
@@ -175,11 +174,19 @@ fun LoginScreen(vm: MainViewModel) {
 
         Spacer(Modifier.height(12.dp))
         PrimaryButton(
-            text = "Essayer sans compte (mode démo)",
+            text = "Se connecter avec ce nom",
             onClick = { vm.demoLogin(name) },
             enabled = !busy,
             loading = busy,
             modifier = Modifier.fillMaxWidth(),
+        )
+
+        Spacer(Modifier.height(10.dp))
+        Text(
+            "Sans compte : commandes possibles. Le chat avec le fournisseur est réservé aux comptes GitHub / Google.",
+            style = MaterialTheme.typography.bodySmall,
+            color = TextMuted,
+            textAlign = TextAlign.Center,
         )
 
         Spacer(Modifier.height(28.dp))

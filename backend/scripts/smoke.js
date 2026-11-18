@@ -4,6 +4,9 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { io as ioClient } from 'socket.io-client';
+import { db } from '../src/db.js';
+import { signToken } from '../src/auth.js';
+import { purgeCompletedOrders } from '../src/cleanup.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(__dirname, '..');
@@ -85,7 +88,7 @@ async function runAll() {
     assert(r.json.version === '1.0.0', 'version != 1.0.0');
   });
 
-  await step('POST /api/auth/demo (supplier + client)', async () => {
+  await step('POST /api/auth/demo + compte vérifié (chat autorisé)', async () => {
     // suffixe unique : le rôle (supplier) persiste en base, on repart d'utilisateurs neufs
     const stamp = Date.now().toString(36);
     const a = await api('POST', '/api/auth/demo', { body: { name: `Smoke Supplier ${stamp}` } });
@@ -98,6 +101,26 @@ async function runAll() {
     state.userA = a.json.user;
     state.tokenB = b.json.token;
     state.userB = b.json.user;
+
+    // Compte « vérifié » (provider github) : le seul autorisé à discuter côté client.
+    const info = db
+      .prepare(
+        "INSERT INTO users (provider, provider_id, name, email, avatar_url, role, created_at) " +
+          "VALUES ('github', ?, ?, NULL, NULL, 'customer', ?)"
+      )
+      .run(`smoke-${stamp}`, `Smoke Client GH ${stamp}`, new Date().toISOString());
+    const gh = db.prepare('SELECT * FROM users WHERE id = ?').get(info.lastInsertRowid);
+    state.tokenGH = signToken(gh);
+    state.userGH = gh;
+  });
+
+  await step('Chat refusé au compte sans nom (403 chat_forbidden)', async () => {
+    const conv = await api('GET', '/api/conversations', { token: state.tokenB });
+    assert(conv.status === 403 && conv.json.code === 'chat_forbidden', `GET conversations → ${conv.status}`);
+    const msg = await api('GET', '/api/conversations/1/messages', { token: state.tokenB });
+    assert(msg.status === 403 && msg.json.code === 'chat_forbidden', `messages → ${msg.status}`);
+    const read = await api('POST', '/api/conversations/1/read', { token: state.tokenB });
+    assert(read.status === 403 && read.json.code === 'chat_forbidden', `read → ${read.status}`);
   });
 
   await step('GET /api/auth/me', async () => {
@@ -188,22 +211,22 @@ async function runAll() {
     assert(viewAsB.status === 403, `GET order par autrui = ${viewAsB.status} (attendu 403)`);
   });
 
-  await step('GET /api/conversations (client crée, supplier liste)', async () => {
-    const asClient = await api('GET', '/api/conversations', { token: state.tokenB });
+  await step('GET /api/conversations (client vérifié crée, supplier liste)', async () => {
+    const asClient = await api('GET', '/api/conversations', { token: state.tokenGH });
     assert(asClient.status === 200, `client status ${asClient.status}`);
     assert(asClient.json.conversations.length === 1, 'client != 1 conversation');
     const conv = asClient.json.conversations[0];
-    assert(conv.customer.id === state.userB.id, 'customer != client');
+    assert(conv.customer.id === state.userGH.id, 'customer != client');
     assert(conv.lastMessage === null && conv.unreadCount === 0, 'init lastMessage/unread KO');
     const asSupplier = await api('GET', '/api/conversations', { token: state.tokenA });
     assert(asSupplier.status === 200, `supplier status ${asSupplier.status}`);
     const listed = asSupplier.json.conversations.find((c) => c.id === conv.id);
     assert(listed, 'conversation absente côté supplier');
-    assert(listed.customer.id === state.userB.id, 'customer côté supplier KO');
+    assert(listed.customer.id === state.userGH.id, 'customer côté supplier KO');
     state.conv = conv;
   });
 
-  await step('Socket.IO : 401 token invalide + conversation:join (ack joined)', async () => {
+  await step('Socket.IO : 401 token invalide + conversation:join (ack joined, démo refusé)', async () => {
     let rejected = null;
     try {
       await connectSocket('invalid-token');
@@ -215,6 +238,13 @@ async function runAll() {
     state.sock = await connectSocket(state.tokenA);
     const ack = await joinConversation(state.sock, state.conv.id);
     assert(ack && ack.status === 'joined', `ack = ${JSON.stringify(ack)}`);
+    const sockGuest = await connectSocket(state.tokenB);
+    const ackGuest = await joinConversation(sockGuest, state.conv.id);
+    assert(
+      ackGuest && ackGuest.status === 'error' && ackGuest.error === 'chat_forbidden',
+      `ack démo = ${JSON.stringify(ackGuest)}`
+    );
+    sockGuest.close();
   });
 
   await step('POST /api/conversations/:id/messages → 201 + event message:new', async () => {
@@ -239,17 +269,17 @@ async function runAll() {
     assert(r.status === 200, `status ${r.status}`);
     assert(r.json.messages.some((m) => m.id === state.message.id), 'message absent');
     assert(r.json.messages[0].body === 'Bonjour, votre commande est prête !', 'tri ASC KO');
-    const unread = await api('GET', '/api/conversations', { token: state.tokenB });
+    const unread = await api('GET', '/api/conversations', { token: state.tokenGH });
     assert(unread.json.conversations[0].unreadCount === 1, 'unreadCount != 1');
-    const read = await api('POST', `/api/conversations/${state.conv.id}/read`, { token: state.tokenB });
+    const read = await api('POST', `/api/conversations/${state.conv.id}/read`, { token: state.tokenGH });
     assert(read.status === 204, `read → ${read.status}`);
-    const after = await api('GET', '/api/conversations', { token: state.tokenB });
+    const after = await api('GET', '/api/conversations', { token: state.tokenGH });
     assert(after.json.conversations[0].unreadCount === 0, 'unreadCount != 0 après read');
     assert(after.json.conversations[0].lastMessage.id === state.message.id, 'lastMessage KO');
   });
 
   await step('OAuth sans clés : redirect not_configured (pas de 500)', async () => {
-    const start = await api('GET', '/api/auth/start?provider=discord', { redirect: 'manual' });
+    const start = await api('GET', '/api/auth/start?provider=github', { redirect: 'manual' });
     assert(start.status === 302, `start → ${start.status}`);
     const expected = `${base}/api/auth/failed?reason=not_configured`;
     assert(start.location === expected, `Location = ${start.location} (attendu ${expected})`);
@@ -261,6 +291,69 @@ async function runAll() {
     assert(cb.location && cb.location.startsWith('shoptabouffe://auth?error=state_mismatch'), `callback Location = ${cb.location}`);
     const unknown = await api('GET', '/api/auth/start?provider=nope', { redirect: 'manual' });
     assert(unknown.status === 404, `provider inconnu → ${unknown.status}`);
+  });
+
+  await step('Purge 2 h : commande terminée supprimée, chat si plus rien en cours', async () => {
+    const stamp = Date.now().toString(36);
+    const old = new Date(Date.now() - 3 * 3600 * 1000).toISOString();
+    const mkUser = (suffix) => {
+      const info = db
+        .prepare(
+          "INSERT INTO users (provider, provider_id, name, email, avatar_url, role, created_at) " +
+            "VALUES ('github', ?, ?, NULL, NULL, 'customer', ?)",
+        )
+        .run(suffix, `Smoke Purge ${suffix}`, new Date().toISOString());
+      return db.prepare('SELECT * FROM users WHERE id = ?').get(info.lastInsertRowid);
+    };
+    const mkOrder = (userId, status) =>
+      db
+        .prepare(
+          "INSERT INTO orders (user_id, status, total_cents, address, phone, note, created_at, updated_at) " +
+            "VALUES (?, ?, 1000, '1 rue du Test', '0611111111', '', ?, ?)",
+        )
+        .run(userId, status, old, old).lastInsertRowid;
+    const mkConv = (userId) =>
+      db
+        .prepare(
+          'INSERT INTO conversations (customer_id, supplier_id, created_at, updated_at) VALUES (?, NULL, ?, ?)',
+        )
+        .run(userId, old, old).lastInsertRowid;
+
+    // Cas 1 : client dont TOUTES les commandes sont terminées → commande + chat purgés
+    const u1 = mkUser(`purge-a-${stamp}`);
+    const done1 = mkOrder(u1.id, 'delivered');
+    const conv1 = mkConv(u1.id);
+    db.prepare(
+      'INSERT INTO messages (conversation_id, sender_id, body, created_at, read_at) VALUES (?, ?, ?, ?, NULL)',
+    ).run(conv1, u1.id, 'Message de test', old);
+
+    // Cas 2 : client avec une commande terminée ET une commande en cours → seul l'historique part
+    const u2 = mkUser(`purge-b-${stamp}`);
+    const done2 = mkOrder(u2.id, 'refused');
+    const active = mkOrder(u2.id, 'pending');
+    const conv2 = mkConv(u2.id);
+
+    purgeCompletedOrders();
+
+    assert(!db.prepare('SELECT 1 AS x FROM orders WHERE id = ?').get(done1), 'commande livrée non purgée');
+    assert(!db.prepare('SELECT 1 AS x FROM orders WHERE id = ?').get(done2), 'commande refusée non purgée');
+    assert(db.prepare('SELECT 1 AS x FROM orders WHERE id = ?').get(active), 'commande en cours purgée par erreur');
+    assert(
+      !db.prepare('SELECT 1 AS x FROM conversations WHERE id = ?').get(conv1),
+      'chat non purgé alors que plus aucune commande en cours',
+    );
+    assert(
+      !db.prepare('SELECT 1 AS x FROM messages WHERE conversation_id = ?').get(conv1),
+      'messages non supprimés en cascade',
+    );
+    assert(
+      db.prepare('SELECT 1 AS x FROM conversations WHERE id = ?').get(conv2),
+      'chat supprimé alors que le client a une commande en cours',
+    );
+
+    // nettoyage des restes du test
+    db.prepare('DELETE FROM conversations WHERE id = ?').run(conv2);
+    db.prepare('DELETE FROM orders WHERE id = ?').run(active);
   });
 
   if (state.sock) state.sock.close();

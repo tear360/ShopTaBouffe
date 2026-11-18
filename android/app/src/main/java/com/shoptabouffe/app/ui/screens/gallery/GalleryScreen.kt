@@ -56,7 +56,6 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.shoptabouffe.app.core.Cart
 import com.shoptabouffe.app.core.models.Product
 import com.shoptabouffe.app.core.toPrice
-import com.shoptabouffe.app.ui.components.ShopTaBouffeTopBar
 import com.shoptabouffe.app.ui.components.EmptyState
 import com.shoptabouffe.app.ui.components.ErrorState
 import com.shoptabouffe.app.ui.components.LoadingBox
@@ -70,49 +69,35 @@ import kotlinx.coroutines.launch
 @Composable
 fun GalleryScreen(
     isSupplier: Boolean,
-    onOpenCart: () -> Unit,
 ) {
     val vm: GalleryViewModel = viewModel()
     val state by vm.state.collectAsStateWithLifecycle()
     val cartLines by Cart.lines.collectAsStateWithLifecycle()
-    val cartCount = cartLines.sumOf { it.qty }
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
     Box(modifier = Modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxSize()) {
-            ShopTaBouffeTopBar(
-                title = "ShopTaBouffe",
-                subtitle = "${state.visible.size} produit(s)",
-                actions = {
-                    IconButton(onClick = { vm.load(refreshing = true) }) {
-                        Icon(Icons.Outlined.Refresh, contentDescription = "Rafraîchir")
-                    }
-                    IconButton(onClick = onOpenCart) {
-                        androidx.compose.material3.BadgedBox(
-                            badge = {
-                                if (cartCount > 0) {
-                                    androidx.compose.material3.Badge { Text(cartCount.toString()) }
-                                }
-                            },
-                        ) {
-                            Icon(Icons.Outlined.ShoppingCart, contentDescription = "Panier")
-                        }
-                    }
-                },
-            )
-
-            OutlinedTextField(
-                value = state.search,
-                onValueChange = vm::setSearch,
-                placeholder = { Text("Rechercher un produit…") },
-                leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
-                singleLine = true,
-                shape = RoundedCornerShape(16.dp),
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 10.dp),
-            )
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                OutlinedTextField(
+                    value = state.search,
+                    onValueChange = vm::setSearch,
+                    placeholder = { Text("Rechercher un produit…") },
+                    leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
+                    singleLine = true,
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier.weight(1f),
+                )
+                IconButton(onClick = { vm.load(refreshing = true) }) {
+                    Icon(Icons.Outlined.Refresh, contentDescription = "Rafraîchir")
+                }
+            }
 
             if (state.categories.isNotEmpty()) {
                 Row(

@@ -1,4 +1,4 @@
-# Brancher Discord, GitHub et Google (OAuth)
+# Brancher GitHub et Google (OAuth)
 
 L'app ouvre un Custom Tab sur `{PUBLIC_URL}/api/auth/start?provider=…`, le **serveur** échange le
 code contre le profil (le `client_secret` ne quitte jamais le serveur), puis renvoie l'app en
@@ -7,20 +7,21 @@ ouvrant le deep link `shoptabouffe://auth?token=…`.
 Vous n'avez donc qu'**une seule URL à déclarer par fournisseur** : le callback du backend.
 
 ```
-https://VOTRE-SERVEUR/api/auth/discord/callback
 https://VOTRE-SERVEUR/api/auth/github/callback
 https://VOTRE-SERVEUR/api/auth/google/callback
 ```
 
 > `VOTRE-SERVEUR` doit être **identique** à la variable `PUBLIC_URL` du serveur, **et** à
 > `delivro.apiUrl` dans `android/local.properties` (sans le `/api`, sans `/` final).
+>
+> Serveur actuel : `VOTRE-SERVEUR` = `https://chorizo.dpdns.org`
 
 ---
 
 ## 1. GitHub
 
 1. <https://github.com/settings/developers> → **New OAuth App**
-2. **Application name** : `Delivro` (libre)
+2. **Application name** : `ShopTaBouffe` (libre)
 3. **Homepage URL** : `https://VOTRE-SERVEUR`
 4. **Authorization callback URL** : `https://VOTRE-SERVEUR/api/auth/github/callback`
 5. **Register application** → copiez le *Client ID*
@@ -31,39 +32,91 @@ GITHUB_CLIENT_ID=Iv1.xxxxxxxxxxxx
 GITHUB_CLIENT_SECRET=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 ```
 
-## 2. Discord
+## 2. Google (guide pas à pas)
 
-1. <https://discord.com/developers/applications> → **New Application** (nom : `Delivro`) → **Create**
-2. Onglet **OAuth2** → *Redirects* → **Add Redirect** :
-   `https://VOTRE-SERVEUR/api/auth/discord/callback` → **Save Changes**
-3. Toujours dans OAuth2 : copiez **Client ID** et **Client Secret** (→ *Reset Secret* si besoin)
+Google est le plus long à configurer. Comptez **10 minutes**.
 
-```env
-DISCORD_CLIENT_ID=123456789012345678
-DISCORD_CLIENT_SECRET=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-```
+### 2.1 Créer le projet
 
-> Scopes utilisés côté serveur : `identify email`.
+1. Ouvrez <https://console.cloud.google.com/>
+2. En haut à gauche (sélecteur de projet) → **New project** → nom `ShopTaBouffe` → **Create**
+   (ou choisissez un projet existant).
+3. Attendez la notification « Project creation completed », sélectionnez le projet.
 
-## 3. Google
+### 2.2 Écran de consentement OAuth
 
-1. <https://console.cloud.google.com/> → projet existant ou **New Project** (`Delivro`)
-2. **APIs & Services → OAuth consent screen**
-   - User Type : **External** → Create
-   - App name, support email → Save and Continue (scopes et test users : passer à l'étape suivante)
-   - Si l'app reste en mode **Testing**, ajoutez votre adresse Google dans **Test users**
-     (sinon la fenêtre de connexion affiche « app non vérifiée »).
-3. **APIs & Services → Credentials → Create Credentials → OAuth client ID**
-   - Application type : **Web application**
-   - Name : `Delivro Web`
-   - **Authorized redirect URIs → Add URI** :
-     `https://VOTRE-SERVEUR/api/auth/google/callback`
-4. **Create** → copiez *Client ID* et *Client Secret*
+1. Menu ☰ → **APIs & Services** → **OAuth consent screen**
+2. **User Type** : **External** → **Create**
+3. Renseignez :
+   - **App name** : `ShopTaBouffe`
+   - **User support email** : votre adresse Gmail
+   - **Developer contact email** : votre adresse Gmail
+   → **Save and Continue**
+4. **Scopes** : cliquez **Add or Remove Scopes**, cochez :
+   - `…/auth/userinfo.email`
+   - `…/auth/userinfo.profile`
+   → **Update** → **Save and Continue**
+5. **Test users** : si vous laissez l'application en mode *Testing*, ajoutez votre adresse
+   Gmail ici (sinon Google refuse la connexion avec « Error 403: access_denied »).
+   → **Save and Continue** → **Back to Dashboard**
+
+> ⚠️ Tant que le projet est en **Testing**, seules les adresses listées comme *Test users* peuvent
+> se connecter. Pour ouvrir à tout le monde : **Publish app** (Google peut demander une vérification
+> si vous publiez des scopes sensibles ; `email`/`profile` restent en vérification légère).
+
+### 2.3 Créer le client OAuth (Web application)
+
+1. Menu ☰ → **APIs & Services** → **Credentials**
+2. **Create Credentials** → **OAuth client ID**
+3. **Application type** : **Web application**
+4. **Name** : `ShopTaBouffe Web`
+5. **Authorized redirect URIs** → **Add URI** :
+   `https://VOTRE-SERVEUR/api/auth/google/callback`
+   (donc ici : `https://chorizo.dpdns.org/api/auth/google/callback`)
+6. **Create** → copiez le **Client ID** et le **Client Secret**
 
 ```env
 GOOGLE_CLIENT_ID=xxxxxxxxxxxx-yyyyyyyyyyyy.apps.googleusercontent.com
 GOOGLE_CLIENT_SECRET=GOCSPX-xxxxxxxxxxxxxxxxxxxx
 ```
+
+### 2.4 Activer l'API People (recommandé)
+
+Pour que Google renvoie bien le profil, activez **People API** :
+☰ → **APIs & Services** → **Library** → cherchez `People API` → **Enable**.
+(Le flux OAuth standard `userinfo` fonctionne aussi, l'activation évite les erreurs.)
+
+### 2.5 Poser les clés sur le serveur
+
+Sur le mini PC (là où tourne le backend) :
+
+```bash
+nano ~/shoptabouffe/backend/.env      # collez GOOGLE_CLIENT_ID et GOOGLE_CLIENT_SECRET
+sudo systemctl restart shoptabouffe   # relance avec les nouvelles variables
+```
+
+Vérifiez que le bouton répond :
+
+```bash
+curl -i "https://chorizo.dpdns.org/api/auth/start?provider=google"
+# attendu : HTTP/2 302 → Location: https://accounts.google.com/o/oauth2/v2/auth?...
+```
+
+Si vous obtenez `{"error":"provider_not_configured"}`, les clés ne sont pas bien chargées
+(`.env` mal formaté ou service non redémarré).
+
+---
+
+## Connexion sans compte (optionnelle)
+
+Le champ « Votre nom » + bouton **« Se connecter avec ce nom »** crée un compte invité
+(`provider = demo`), sans mot de passe ni e-mail.
+
+⚠️ **Par sécurité, un compte invité n'a pas accès au chat avec le fournisseur** : le bouton
+« Discuter avec le fournisseur » est masqué, et le serveur renvoie `403 chat_forbidden` sur les
+routes `/api/conversations*` et sur le socket `conversation:join`.
+
+Pour désactiver complètement cette connexion : `ALLOW_DEMO_LOGIN=false` dans le `.env`.
 
 ---
 
@@ -79,31 +132,16 @@ Variables importantes :
 
 | var | ex. | rôle |
 |---|---|---|
-| `PUBLIC_URL` | `https://mon-delivro.up.railway.app` | base publique (callbacks OAuth + Socket.IO) |
-| `APP_REDIRECT_SCHEME` | `delivro` | schéma du deep link de retour vers l'app |
+| `PUBLIC_URL` | `https://chorizo.dpdns.org` | base publique (callbacks OAuth + Socket.IO) |
+| `APP_REDIRECT_SCHEME` | `shoptabouffe` | schéma du deep link de retour vers l'app |
 | `ADMIN_CODE` | `SUPPLIER-2026` | code pour activer le mode fournisseur |
-| `DISCORD_*` / `GITHUB_*` / `GOOGLE_*` | — | clés OAuth ci-dessus |
+| `ALLOW_DEMO_LOGIN` | `true` | active la connexion par nom (sans chat) |
+| `GITHUB_*` / `GOOGLE_*` | — | clés OAuth ci-dessus |
 
-Sans clés, l'app reste utilisable : la connexion sociale affiche un message explicite et le
-**mode démo** (bouton « Essayer sans compte ») fonctionne à 100 %.
+Sans clés, l'app reste utilisable : la connexion sociale affiche un message explicite et la
+**connexion par nom** fonctionne (sans chat).
 
 ---
-
-## Développement local : pourquoi un tunnel ?
-
-Les trois fournisseurs exigent un callback **https** (Google n'accepte que `localhost` en http).
-Sur un émulateur Android, `PUBLIC_URL` doit être joignable **par le téléphone** :
-
-```powershell
-# option A — tunnel (ex. cloudflared)
-cloudflared tunnel --url http://localhost:3000
-# → https://random-url.trycloudflare.com  → PUBLIC_URL=https://random-url.trycloudflare.com
-
-# option B — déployer (Render / Railway / VPS) : le plus simple pour un usage réel
-```
-
-Puis mettez à jour `PUBLIC_URL` **et** `delivro.apiUrl` (dans `android/local.properties`)
-avec la même base, et relancez `npm start` + le build Android.
 
 ## Sécurité
 
@@ -111,3 +149,4 @@ avec la même base, et relancez `npm start` + le build Android.
 - `state` aléatoire à usage unique protège contre le CSRF du flux.
 - Le code fournisseur (`ADMIN_CODE`) est protégé par un rate limit (10 essais / 15 min / IP).
 - En production : mettez un `JWT_SECRET` fort et servez le tout derrière **HTTPS**.
+- Les comptes invités (sans compte) sont volontairement privés du chat fournisseur.

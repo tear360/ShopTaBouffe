@@ -16,6 +16,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.BugReport
 import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.Logout
@@ -77,6 +78,7 @@ import kotlinx.coroutines.launch
 
 @Composable
 fun ProfileScreen(user: User, vm: MainViewModel) {
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
     val socketConnected by SocketManager.connected.collectAsStateWithLifecycle()
@@ -104,8 +106,6 @@ fun ProfileScreen(user: User, vm: MainViewModel) {
 
     Box(modifier = Modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxSize()) {
-            ShopTaBouffeTopBar(title = "Mon profil")
-
             LazyColumn(
                 contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 32.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -259,7 +259,7 @@ fun ProfileScreen(user: User, vm: MainViewModel) {
                 item { SectionHeader(title = "Paramètres") }
 
                 item {
-                    SettingsCard()
+                    SettingsCard(isSupplier = user.isSupplier)
                 }
 
                 item { SectionHeader(title = "Application") }
@@ -309,6 +309,25 @@ fun ProfileScreen(user: User, vm: MainViewModel) {
                                         else -> "Vérifier les mises à jour"
                                     },
                                 )
+                            }
+                            Spacer(Modifier.height(12.dp))
+                            OutlinedButton(
+                                onClick = {
+                                    val intent = Intent(
+                                        Intent.ACTION_VIEW,
+                                        Uri.parse("https://github.com/tear360/ShopTaBouffe/issues/new"),
+                                    )
+                                    context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Icon(
+                                    Icons.Outlined.BugReport,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp),
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text("Signaler un problème")
                             }
                             Spacer(Modifier.height(12.dp))
                             OutlinedButton(
@@ -379,7 +398,7 @@ private fun InfoLine(icon: @Composable () -> Unit, label: String, value: String)
 
 /** Carte « Paramètres » : interrupteurs de notifications (persistés par [Notifier]). */
 @Composable
-private fun SettingsCard() {
+private fun SettingsCard(isSupplier: Boolean) {
     val context = LocalContext.current
     val newOrders by Notifier.newOrders.collectAsStateWithLifecycle()
     val orderStatus by Notifier.orderStatus.collectAsStateWithLifecycle()
@@ -397,7 +416,7 @@ private fun SettingsCard() {
         }
     }
 
-    val permissionMissing = (newOrders || orderStatus) && !Notifier.canNotify(context)
+    val permissionMissing = ((isSupplier && newOrders) || orderStatus) && !Notifier.canNotify(context)
 
     Surface(
         shape = RoundedCornerShape(20.dp),
@@ -406,14 +425,17 @@ private fun SettingsCard() {
         modifier = Modifier.fillMaxWidth(),
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            SettingsSwitch(
-                icon = { Icon(Icons.Outlined.Notifications, null, tint = MaterialTheme.colorScheme.primary) },
-                title = "Nouvelles commandes",
-                description = "Prévenez-moi dès qu’un client passe commande",
-                checked = newOrders,
-                onCheckedChange = { toggle(it, Notifier::setNewOrdersEnabled) },
-            )
-            HorizontalDivider(modifier = Modifier.padding(vertical = 6.dp))
+            // « Nouvelles commandes » ne concerne que le fournisseur (le vendeur reçoit les commandes).
+            if (isSupplier) {
+                SettingsSwitch(
+                    icon = { Icon(Icons.Outlined.Notifications, null, tint = MaterialTheme.colorScheme.primary) },
+                    title = "Nouvelles commandes",
+                    description = "Prévenez-moi dès qu’un client passe commande",
+                    checked = newOrders,
+                    onCheckedChange = { toggle(it, Notifier::setNewOrdersEnabled) },
+                )
+                HorizontalDivider(modifier = Modifier.padding(vertical = 6.dp))
+            }
             SettingsSwitch(
                 icon = {
                     Icon(

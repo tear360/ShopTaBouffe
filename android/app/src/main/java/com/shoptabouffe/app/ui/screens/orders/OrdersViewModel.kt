@@ -38,10 +38,13 @@ class OrdersViewModel(app: Application) : AndroidViewModel(app) {
     val state: StateFlow<OrdersState> = _state.asStateFlow()
 
     private var unsubscribeUpdated: (() -> Unit)? = null
+    private var unsubscribeDeleted: (() -> Unit)? = null
 
     init {
         load()
         unsubscribeUpdated = SocketManager.on("order:updated") { load(refreshing = true) }
+        // Commande purgée après 2 h (terminée) : elle disparaît de la liste.
+        unsubscribeDeleted = SocketManager.on("order:deleted") { load(refreshing = true) }
     }
 
     fun load(refreshing: Boolean = false) {
@@ -70,6 +73,7 @@ class OrdersViewModel(app: Application) : AndroidViewModel(app) {
 
     override fun onCleared() {
         unsubscribeUpdated?.invoke()
+        unsubscribeDeleted?.invoke()
         super.onCleared()
     }
 }

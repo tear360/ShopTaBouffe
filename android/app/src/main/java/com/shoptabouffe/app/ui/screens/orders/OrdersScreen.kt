@@ -36,7 +36,6 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.shoptabouffe.app.core.models.Order
 import com.shoptabouffe.app.core.toPrice
 import com.shoptabouffe.app.core.toShortDateTime
-import com.shoptabouffe.app.ui.components.ShopTaBouffeTopBar
 import com.shoptabouffe.app.ui.components.EmptyState
 import com.shoptabouffe.app.ui.components.ErrorState
 import com.shoptabouffe.app.ui.components.LoadingBox
@@ -56,29 +55,28 @@ fun OrdersScreen(onOpenOrder: (Long) -> Unit) {
     val state by vm.state.collectAsStateWithLifecycle()
 
     Column(modifier = Modifier.fillMaxSize()) {
-        ShopTaBouffeTopBar(
-            title = "Mes commandes",
-            subtitle = "${state.visible.size} commande(s)",
-            actions = {
-                IconButton(onClick = { vm.load(refreshing = true) }) {
-                    Icon(Icons.Outlined.Refresh, contentDescription = "Rafraîchir")
-                }
-            },
-        )
-
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .horizontalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 10.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                .padding(horizontal = 16.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            FILTERS.forEach { (value, label) ->
-                FilterChip(
-                    selected = state.filter == value,
-                    onClick = { vm.setFilter(value) },
-                    label = { Text(label) },
-                )
+            Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                FILTERS.forEach { (value, label) ->
+                    FilterChip(
+                        selected = state.filter == value,
+                        onClick = { vm.setFilter(value) },
+                        label = { Text(label) },
+                    )
+                }
+            }
+            IconButton(onClick = { vm.load(refreshing = true) }) {
+                Icon(Icons.Outlined.Refresh, contentDescription = "Rafraîchir")
             }
         }
 

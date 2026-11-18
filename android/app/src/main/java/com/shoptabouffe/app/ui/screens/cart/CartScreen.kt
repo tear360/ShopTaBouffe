@@ -50,7 +50,6 @@ import com.shoptabouffe.app.core.models.CreateOrderBody
 import com.shoptabouffe.app.core.models.CreateOrderLine
 import com.shoptabouffe.app.core.toPrice
 import com.shoptabouffe.app.ui.components.CartEmptyIcon
-import com.shoptabouffe.app.ui.components.ShopTaBouffeTopBar
 import com.shoptabouffe.app.ui.components.EmptyState
 import com.shoptabouffe.app.ui.components.PrimaryButton
 import com.shoptabouffe.app.ui.components.ProductImage
@@ -70,19 +69,12 @@ fun CartScreen(onOrderCreated: (Long) -> Unit) {
     var error by remember { mutableStateOf<String?>(null) }
 
     val totalCents = lines.sumOf { it.lineTotalCents }
-    val count = lines.sumOf { it.qty }
     val addressValid = address.trim().length >= 3
     val phoneValid = phone.trim().filter { it.isLetterOrDigit() }.length >= 6
     val canSend = lines.isNotEmpty() && addressValid && phoneValid && !sending
 
     Box(modifier = Modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxSize()) {
-            ShopTaBouffeTopBar(
-                title = "Panier",
-                subtitle = if (lines.isEmpty()) "Aucun article"
-                else "$count article(s) · ${totalCents.toPrice()}",
-            )
-
             if (lines.isEmpty()) {
                 EmptyState(
                     icon = CartEmptyIcon,

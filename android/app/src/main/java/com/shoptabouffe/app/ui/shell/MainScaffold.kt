@@ -76,11 +76,14 @@ fun MainScaffold(user: User, vm: MainViewModel) {
     val cartLines by Cart.lines.collectAsStateWithLifecycle()
     val cartCount = cartLines.sumOf { it.qty }
 
+    // Un vendeur ne commande pas : Panier et Commandes sont masqués côté client.
     val tabs = remember(user.isSupplier) {
         listOfNotNull(
             TabSpec(Routes.GALLERY, "Boutique", Icons.Outlined.Storefront),
-            TabSpec(Routes.CART, "Panier", Icons.Outlined.ShoppingCart),
-            TabSpec(Routes.ORDERS, "Commandes", Icons.AutoMirrored.Outlined.ReceiptLong),
+            if (!user.isSupplier) TabSpec(Routes.CART, "Panier", Icons.Outlined.ShoppingCart) else null,
+            if (!user.isSupplier) {
+                TabSpec(Routes.ORDERS, "Commandes", Icons.AutoMirrored.Outlined.ReceiptLong)
+            } else null,
             if (user.isSupplier) {
                 TabSpec(Routes.ADMIN, "Fournisseur", Icons.Outlined.Dashboard)
             } else null,
@@ -146,7 +149,6 @@ fun MainScaffold(user: User, vm: MainViewModel) {
             composable(Routes.GALLERY) {
                 GalleryScreen(
                     isSupplier = user.isSupplier,
-                    onOpenCart = { nav.navigate(Routes.CART) },
                 )
             }
 
@@ -171,6 +173,7 @@ fun MainScaffold(user: User, vm: MainViewModel) {
                 val orderId = entry.arguments?.getLong("orderId") ?: return@composable
                 OrderDetailScreen(
                     orderId = orderId,
+                    canChat = user.provider != "demo",
                     onBack = { nav.popBackStack() },
                     onOpenChat = { nav.navigate(Routes.chat(it)) },
                 )

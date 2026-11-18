@@ -173,7 +173,7 @@ object Api {
     } catch (e: HttpException) {
         ApiResult.Failure(messageFor(e), e.code())
     } catch (e: IOException) {
-        ApiResult.Failure("Impossible de contacter le serveur. Vérifiez que le backend est lancé.", 0)
+        ApiResult.Failure("Erreur : vérifiez votre connexion à Internet", 0)
     } catch (e: JsonSyntaxException) {
         ApiResult.Failure("Réponse invalide du serveur.", 0)
     } catch (e: Exception) {
@@ -225,6 +225,7 @@ object Api {
             404 -> "Ressource introuvable."
             409 -> "Opération impossible en l'état."
             429 -> "Trop de tentatives, réessayez dans un instant."
+            502, 503, 504 -> "Erreur : vérifiez votre connexion à Internet"
             else -> "Erreur ${e.code()}."
         }
     }
