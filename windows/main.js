@@ -11,7 +11,7 @@
 const { app, BrowserWindow, shell, Menu, dialog } = require('electron');
 const path = require('path');
 
-const START_URL = process.env.STB_URL || 'https://chorizo.dpdns.org/';
+const START_URL = process.env.STB_URL || 'https://chorizo.dpdns.org/app/';
 const APP_NAME = 'ShopTaBouffe';
 
 let mainWindow = null;

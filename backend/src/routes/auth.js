@@ -54,7 +54,7 @@ router.get('/start', (req, res) => {
   if (!isConfigured(conf)) {
     return res.redirect(
       isWeb
-        ? `${PUBLIC_URL}/?error=not_configured`
+        ? `${PUBLIC_URL}/app?error=not_configured`
         : `${PUBLIC_URL}/api/auth/failed?reason=not_configured`
     );
   }
@@ -79,7 +79,7 @@ router.get('/failed', (req, res) => {
   const reason = ERROR_REASONS.has(String(req.query.reason)) ? String(req.query.reason) : 'provider_error';
   const isWeb = req.cookies && req.cookies.oauth_target === 'web';
   res.clearCookie('oauth_target', { path: '/' });
-  if (isWeb) return res.redirect(`${PUBLIC_URL}/?error=${encodeURIComponent(reason)}`);
+  if (isWeb) return res.redirect(`${PUBLIC_URL}/app?error=${encodeURIComponent(reason)}`);
   return res.redirect(deepLink({ error: reason }));
 });
 
@@ -91,7 +91,7 @@ router.get('/:provider/callback', async (req, res) => {
   const fail = (code) => {
     res.clearCookie('oauth_state', { path: '/' });
     res.clearCookie('oauth_target', { path: '/' });
-    if (isWeb) return res.redirect(`${PUBLIC_URL}/?error=${encodeURIComponent(code)}`);
+    if (isWeb) return res.redirect(`${PUBLIC_URL}/app?error=${encodeURIComponent(code)}`);
     return res.redirect(deepLink({ error: code }));
   };
 
@@ -121,7 +121,7 @@ router.get('/:provider/callback', async (req, res) => {
         name: user.name,
         role: user.role,
       }).toString();
-      return res.redirect(`${PUBLIC_URL}/?${qs}`);
+      return res.redirect(`${PUBLIC_URL}/app?${qs}`);
     }
     return res.redirect(
       deepLink({

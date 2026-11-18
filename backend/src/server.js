@@ -67,10 +67,20 @@ app.use('/api', (_req, res) => {
   res.status(404).json({ error: 'Route introuvable' });
 });
 
-// UI web (app Windows / navigateur) : fichiers statiques + repli SPA
-app.use(express.static(WEB_DIR, { index: 'index.html', maxAge: '5m' }));
-app.get('*', (_req, res) => {
-  res.sendFile(path.join(WEB_DIR, 'index.html'));
+// UI web (app Windows / navigateur) : servie sous /app pour ne pas exposer
+// la boutique sur la racine du site (chorizo.dpdns.org/ = page API).
+app.use(express.static(WEB_DIR, { index: false, maxAge: '5m' }));
+app.get('/app', (_req, res) => res.sendFile(path.join(WEB_DIR, 'index.html')));
+app.get('/app/*', (_req, res) => res.sendFile(path.join(WEB_DIR, 'index.html')));
+
+// Racine : page d'information (pas de boutique).
+app.get('/', (_req, res) => {
+  res.type('html').send(
+    '<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>ShopTaBouffe</title></head>' +
+    '<body style="font-family:sans-serif;padding:40px;color:#222"><h1>ShopTaBouffe</h1>' +
+    '<p>API backend. L\'application mobile / Windows se connecte via cette URL.</p>' +
+    '<p><a href="/app">Ouvrir l\'app web</a> · <a href="/api/health">Health</a></p></body></html>',
+  );
 });
 
 // Erreurs → JSON
