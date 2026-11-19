@@ -697,7 +697,7 @@ function viewProfile() {
       <form id="supplier-form">
         <div class="field">
           <label for="sup-code">Code d’accès fournisseur</label>
-          <input id="sup-code" name="code" placeholder="Ex. : 82dha92jdao8210dajod821JS0" required />
+          <input id="sup-code" name="code" placeholder="Code d'accès" required />
         </div>
         <button class="btn" type="submit">Activer l’espace fournisseur</button>
       </form>`}
