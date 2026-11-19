@@ -5,23 +5,6 @@ import { getIO } from '../sockets.js';
 
 const router = Router();
 
-/**
- * Login par nom (provider "demo") = accès refusé au chat, par sécurité :
- * un compte non vérifié ne doit pas pouvoir contacter le fournisseur.
- * Un vendeur (role "supplier") reste autorisé, même connecté par nom.
- * Renvoie true si l'accès est bloqué (une réponse 403 est déjà envoyée).
- */
-function blockDemoChat(req, res) {
-  if (req.user && req.user.provider === 'demo' && req.user.role !== 'supplier') {
-    res.status(403).json({
-      error: 'Chat réservé aux comptes connectés via GitHub ou Google',
-      code: 'chat_forbidden',
-    });
-    return true;
-  }
-  return false;
-}
-
 /** Conversation du client : créée à la volée si absente (supplier = 1er supplier connu). */
 function ensureClientConversation(userId) {
   let conv = db.prepare('SELECT * FROM conversations WHERE customer_id = ?').get(userId);
@@ -77,7 +60,6 @@ function toMessage(row) {
 
 /** Charge la conversation et vérifie la participation (404/403 sinon). */
 function loadParticipantConversation(req, res) {
-  if (blockDemoChat(req, res)) return null;
   const id = Number(req.params.id);
   const conv = Number.isInteger(id) && id > 0
     ? db.prepare('SELECT * FROM conversations WHERE id = ?').get(id)
@@ -98,7 +80,6 @@ function loadParticipantConversation(req, res) {
 
 /** GET /api/conversations */
 router.get('/', requireAuth, (req, res) => {
-  if (blockDemoChat(req, res)) return undefined;
   let convs;
   if (req.user.role === 'supplier') {
     // adoption des conversations orphelines (sans supplier assigné)

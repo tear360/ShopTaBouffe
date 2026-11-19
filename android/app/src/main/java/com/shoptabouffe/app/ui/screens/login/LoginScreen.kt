@@ -163,7 +163,7 @@ fun LoginScreen(vm: MainViewModel) {
 
         Spacer(Modifier.height(10.dp))
         Text(
-            "Sans compte : commandes possibles. Le chat avec le fournisseur est réservé aux comptes Google / GitHub.",
+            "Sans compte : commandes possibles. Le chat avec le fournisseur est désormais accessible à tous.",
             style = MaterialTheme.typography.bodySmall,
             color = TextMuted,
             textAlign = TextAlign.Center,

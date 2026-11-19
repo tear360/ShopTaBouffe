@@ -18,7 +18,7 @@ delivro/
 **Client**
 - Connexion en **1 clic** avec GitHub ou Google (Custom Tab → retour en deep link
   `shoptabouffe://auth?token=…`), ou **connexion par nom** sans compte.
-  ⚠️ Un compte créé par nom est **exclu du chat fournisseur** (par sécurité).
+  Le chat fournisseur est désormais accessible à tous, y compris aux comptes créés par nom.
 - Galerie de produits : recherche, filtres par catégorie, fiche produit, quantités.
 - Panier persistant pendant la session, commande avec adresse / téléphone / note.
 - Suivi des commandes (statuts : en attente → acceptée → préparation → livraison → livrée,

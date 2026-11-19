@@ -257,7 +257,7 @@ function viewLogin() {
 function cartCount() { return state.cart.reduce((n, l) => n + l.qty, 0); }
 
 function isSupplier() { return state.user && state.user.role === 'supplier'; }
-function chatAllowed() { return state.user && (state.user.provider !== 'demo' || isSupplier()); }
+function chatAllowed() { return state.user != null; }
 
 function navItems() {
   const items = [

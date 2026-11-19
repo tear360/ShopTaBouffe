@@ -112,9 +112,10 @@ Si vous obtenez `{"error":"provider_not_configured"}`, les clés ne sont pas bie
 Le champ « Votre nom » + bouton **« Se connecter avec ce nom »** crée un compte invité
 (`provider = demo`), sans mot de passe ni e-mail.
 
-⚠️ **Par sécurité, un compte invité n'a pas accès au chat avec le fournisseur** : le bouton
-« Discuter avec le fournisseur » est masqué, et le serveur renvoie `403 chat_forbidden` sur les
-routes `/api/conversations*` et sur le socket `conversation:join`.
+⚠️ **Le chat est désormais accessible à tous**, y compris aux comptes invités (par nom) :
+le bouton « Discuter avec le fournisseur » est toujours affiché et le serveur n'impose
+plus la restriction `chat_forbidden` sur `/api/conversations*` ni sur le socket
+`conversation:join`.
 
 Pour désactiver complètement cette connexion : `ALLOW_DEMO_LOGIN=false` dans le `.env`.
 
@@ -135,11 +136,11 @@ Variables importantes :
 | `PUBLIC_URL` | `https://chorizo.dpdns.org` | base publique (callbacks OAuth + Socket.IO) |
 | `APP_REDIRECT_SCHEME` | `shoptabouffe` | schéma du deep link de retour vers l'app |
 | `ADMIN_CODE` | `82dha92jdao8210dajod821JS0` | code pour activer le mode fournisseur |
-| `ALLOW_DEMO_LOGIN` | `true` | active la connexion par nom (sans chat) |
+| `ALLOW_DEMO_LOGIN` | `true` | active la connexion par nom (avec chat) |
 | `GITHUB_*` / `GOOGLE_*` | — | clés OAuth ci-dessus |
 
 Sans clés, l'app reste utilisable : la connexion sociale affiche un message explicite et la
-**connexion par nom** fonctionne (sans chat).
+**connexion par nom** fonctionne (avec chat).
 
 ---
 

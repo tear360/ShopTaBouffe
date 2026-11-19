@@ -179,7 +179,7 @@ fun MainScaffold(user: User, vm: MainViewModel) {
                 val orderId = entry.arguments?.getLong("orderId") ?: return@composable
                 OrderDetailScreen(
                     orderId = orderId,
-                    canChat = user.provider != "demo",
+                    canChat = true,
                     onBack = { nav.popBackStack() },
                     onOpenChat = { nav.navigate(Routes.chat(it)) },
                 )

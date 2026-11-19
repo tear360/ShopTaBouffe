@@ -1324,7 +1324,7 @@ impl ShopApp {
     }
 
     fn can_chat(&self) -> bool {
-        self.user.as_ref().map(|u| u.can_chat()).unwrap_or(false)
+        true
     }
 
     fn cart_qty(&self) -> i64 {

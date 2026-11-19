@@ -160,7 +160,7 @@ fun FinancesScreen() {
                         )
                     }
                 } else {
-                    items(state.products, key = { it.productId ?: 0L }) { p ->
+                    items(state.products, key = { "${it.productId ?: 0L}|${it.name}" }) { p ->
                         ProductRevenueRow(p)
                     }
                 }

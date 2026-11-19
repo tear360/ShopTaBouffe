@@ -117,13 +117,13 @@ router.get('/products', (req, res) => {
   const c = dateClause('s.delivered_at', period);
   const rows = db
     .prepare(
-      `SELECT si.product_id, si.name,
+      `SELECT si.product_id, MAX(si.name) AS name,
               COALESCE(SUM(si.qty), 0) AS units,
               COALESCE(SUM(si.price_cents * si.qty), 0) AS revenue_cents,
               COALESCE(SUM(si.cost_cents * si.qty), 0) AS cost_cents
        FROM sale_items si JOIN sales s ON s.id = si.sale_id
        WHERE 1 = 1${c.where}
-       GROUP BY si.product_id, si.name
+       GROUP BY si.product_id
        ORDER BY revenue_cents DESC, units DESC`
     )
     .all(...c.params);

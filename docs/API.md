@@ -50,11 +50,10 @@ Login sans compte ni mot de passe (champ « Votre nom » de l'écran de connexio
 un user `provider='demo'`, `provider_id='demo:<slug name>'`, rôle `customer`.
 Réponse 200 : objet `AuthResponse` (voir §1.1). Désactivable via `ALLOW_DEMO_LOGIN=false`.
 
-⚠️ **Sécurité : un compte invité n'a pas accès au chat.** Toutes les routes `/api/conversations*`
-renvoient `403 { error, code: 'chat_forbidden' }` et le socket `conversation:join` renvoie
-`{ status: 'error', error: 'chat_forbidden' }` pour `provider === 'demo'`.
-Exception : un compte devenu **fournisseur** (`role = 'supplier'`, via le code fournisseur)
-conserve l'accès au chat, y compris s'il s'est connecté par nom.
+⚠️ **Chat désormais ouvert à tous les comptes** (y compris les connexions par nom / « Invité ») :
+les routes `/api/conversations*` et le socket `conversation:join` n'imposent plus de
+restriction sur `provider === 'demo'`. Un compte devenu **fournisseur** (`role = 'supplier'`,
+via le code fournisseur) reste naturellement autorisé.
 
 ### `GET /api/auth/me` → 200 `User`
 ```json
@@ -274,7 +273,7 @@ des images `https://images.unsplash.com/...&w=600` et prix réalistes.
 | `APP_REDIRECT_SCHEME` | `shoptabouffe` | schéma du deep link de retour |
 | `JWT_SECRET` | aléatoire au 1er lancement (persisté dans la DB) | signature JWT |
 | `ADMIN_CODE` | `82dha92jdao8210dajod821JS0` | code fournisseur |
-| `ALLOW_DEMO_LOGIN` | `true` | active `POST /api/auth/demo` (connexion par nom, sans chat) |
+| `ALLOW_DEMO_LOGIN` | `true` | active `POST /api/auth/demo` (connexion par nom, avec chat) |
 | `ORDER_RETENTION_HOURS` | `2` | purge des commandes terminées après ce délai |
 | `ORDER_PURGE_INTERVAL_S` | `60` | fréquence du tour de purge |
 | `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | — | OAuth GitHub |

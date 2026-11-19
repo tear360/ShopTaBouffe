@@ -102,7 +102,7 @@ async function runAll() {
     state.tokenB = b.json.token;
     state.userB = b.json.user;
 
-    // Compte « vérifié » (provider github) : le seul autorisé à discuter côté client.
+    // Compte OAuth (provider github) : sert de client avec historique de chat.
     const info = db
       .prepare(
         "INSERT INTO users (provider, provider_id, name, email, avatar_url, role, created_at) " +
@@ -114,13 +114,16 @@ async function runAll() {
     state.userGH = gh;
   });
 
-  await step('Chat refusé au compte sans nom (403 chat_forbidden)', async () => {
+  await step('Chat autorisé au compte sans nom (démo)', async () => {
     const conv = await api('GET', '/api/conversations', { token: state.tokenB });
-    assert(conv.status === 403 && conv.json.code === 'chat_forbidden', `GET conversations → ${conv.status}`);
-    const msg = await api('GET', '/api/conversations/1/messages', { token: state.tokenB });
-    assert(msg.status === 403 && msg.json.code === 'chat_forbidden', `messages → ${msg.status}`);
-    const read = await api('POST', '/api/conversations/1/read', { token: state.tokenB });
-    assert(read.status === 403 && read.json.code === 'chat_forbidden', `read → ${read.status}`);
+    assert(conv.status === 200, `GET conversations → ${conv.status}`);
+    assert(Array.isArray(conv.json.conversations) && conv.json.conversations.length === 1, 'client != 1 conversation');
+    const id = conv.json.conversations[0].id;
+    const msg = await api('GET', `/api/conversations/${id}/messages`, { token: state.tokenB });
+    assert(msg.status === 200 && Array.isArray(msg.json.messages), `messages → ${msg.status}`);
+    const read = await api('POST', `/api/conversations/${id}/read`, { token: state.tokenB });
+    assert(read.status === 204, `read → ${read.status}`);
+    state.guestConvId = id;
   });
 
   await step('GET /api/auth/me', async () => {
@@ -378,7 +381,7 @@ async function runAll() {
     state.conv = conv;
   });
 
-  await step('Socket.IO : 401 token invalide + conversation:join (ack joined, démo refusé)', async () => {
+  await step('Socket.IO : 401 token invalide + conversation:join (ack joined)', async () => {
     let rejected = null;
     try {
       await connectSocket('invalid-token');
@@ -391,11 +394,8 @@ async function runAll() {
     const ack = await joinConversation(state.sock, state.conv.id);
     assert(ack && ack.status === 'joined', `ack = ${JSON.stringify(ack)}`);
     const sockGuest = await connectSocket(state.tokenB);
-    const ackGuest = await joinConversation(sockGuest, state.conv.id);
-    assert(
-      ackGuest && ackGuest.status === 'error' && ackGuest.error === 'chat_forbidden',
-      `ack démo = ${JSON.stringify(ackGuest)}`
-    );
+    const ackGuest = await joinConversation(sockGuest, state.guestConvId);
+    assert(ackGuest && ackGuest.status === 'joined', `ack démo = ${JSON.stringify(ackGuest)}`);
     sockGuest.close();
   });
 

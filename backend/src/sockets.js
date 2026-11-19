@@ -39,11 +39,6 @@ export function initSockets(httpServer) {
     // Client : conversation:join { conversationId } → vérifie participation → room conv:<id>
     socket.on('conversation:join', (payload, ack) => {
       const reply = typeof ack === 'function' ? ack : () => {};
-      // Login par nom (provider "demo") : le client n'a pas accès au chat, par sécurité.
-      // Un vendeur (role "supplier") reste autorisé.
-      if (user.provider === 'demo' && user.role !== 'supplier') {
-        return reply({ status: 'error', error: 'chat_forbidden' });
-      }
       const conversationId = payload ? Number(payload.conversationId) : NaN;
       const conv = Number.isInteger(conversationId)
         ? db.prepare('SELECT * FROM conversations WHERE id = ?').get(conversationId)

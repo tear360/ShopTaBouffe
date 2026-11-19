@@ -32,14 +32,12 @@ fun String.eurosToCents(): Int? {
     return euros * 100 + cents
 }
 
-private val isoInput = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.FRANCE)
-private val isoOutput = SimpleDateFormat("dd/MM HH:mm", Locale.FRANCE)
-private val isoDay = SimpleDateFormat("dd MMM", Locale.FRANCE)
-
 /** "2026-11-15T14:32:07.000Z" → "15/11 14:32" (best effort, pas de java.time pour minSdk 24). */
 fun String?.toShortDateTime(): String {
     if (this.isNullOrBlank()) return "—"
     return try {
+        val isoInput = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.FRANCE)
+        val isoOutput = SimpleDateFormat("dd/MM HH:mm", Locale.FRANCE)
         isoOutput.format(isoInput.parse(this.substringBefore(".").take(19)) ?: return "—")
     } catch (_: Exception) {
         take(16).replace('T', ' ')
@@ -50,6 +48,8 @@ fun String?.toShortDateTime(): String {
 fun String?.toDayMonth(): String {
     if (this.isNullOrBlank()) return "—"
     return try {
+        val isoInput = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.FRANCE)
+        val isoDay = SimpleDateFormat("dd MMM", Locale.FRANCE)
         isoDay.format(isoInput.parse(this.substringBefore(".").take(19)) ?: return "—")
     } catch (_: Exception) {
         take(10)
