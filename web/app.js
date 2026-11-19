@@ -260,7 +260,6 @@ function viewLogin() {
     <div class="login-card">
       <div class="login-logo">${ICONS.bag}</div>
       <h1>ShopTaBouffe</h1>
-      <p class="sub">Commandez chez vos commerçants locaux</p>
       ${err ? `<div class="login-error">${h(err)}</div>` : ''}
       <form id="login-form">
         <div class="field">
@@ -275,10 +274,6 @@ function viewLogin() {
       <div class="divider">ou continuer avec</div>
       <a class="btn btn-provider google" href="/api/auth/start?provider=google&target=web">${LOGO_GOOGLE} Continuer avec Google</a>
       <a class="btn btn-provider github" href="/api/auth/start?provider=github&target=web">${LOGO_GITHUB} Continuer avec GitHub</a>
-      <p class="login-note">
-        Connexion par nom = compte invité : <strong>pas d’accès au chat</strong> avec le vendeur.
-        Le chat s’ouvre avec Google ou GitHub.
-      </p>
     </div>
   </div>`;
 }
@@ -763,7 +758,6 @@ function viewProfile() {
       <span class="ic"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg></span>
       <div class="info">
         <div class="t">Signaler un problème</div>
-        <div class="s">Ouvre les tickets GitHub du projet</div>
       </div>
       <a class="btn btn-ghost btn-sm" href="${ISSUES_URL}" target="_blank" rel="noreferrer">Ouvrir</a>
     </div>
@@ -778,7 +772,6 @@ function viewProfile() {
       <span class="ic"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg></span>
       <div class="info">
         <div class="t">Se déconnecter</div>
-        <div class="s">Vos commandes restent conservées</div>
       </div>
       <button class="btn btn-danger btn-sm" data-action="logout">Déconnexion</button>
     </div>
