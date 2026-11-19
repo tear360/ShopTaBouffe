@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -160,7 +161,7 @@ fun FinancesScreen() {
                         )
                     }
                 } else {
-                    items(state.products, key = { "${it.productId ?: 0L}|${it.name}" }) { p ->
+                    itemsIndexed(state.products, key = { i, p -> "p-$i-${p.productId ?: 0L}|${p.name ?: ""}" }) { _, p ->
                         ProductRevenueRow(p)
                     }
                 }
@@ -178,7 +179,7 @@ fun FinancesScreen() {
                         )
                     }
                 } else {
-                    items(state.sales, key = { it.id }) { sale ->
+                    itemsIndexed(state.sales, key = { i, s -> "s-$i-${s.id ?: 0L}" }) { _, sale ->
                         SaleRow(sale)
                     }
                 }
@@ -205,7 +206,7 @@ fun FinancesScreen() {
                         )
                     }
                 } else {
-                    items(state.expenses, key = { it.id }) { exp ->
+                    itemsIndexed(state.expenses, key = { i, e -> "e-$i-${e.id ?: 0L}" }) { _, exp ->
                         ExpenseRow(exp) { deletingExpense = exp }
                     }
                 }
@@ -223,11 +224,11 @@ private fun PeriodChip(label: String, selected: Boolean, onClick: () -> Unit) {
 private fun SummaryGrid(s: com.shoptabouffe.app.core.models.FinanceSummary?) {
     if (s == null) return
     val cards = listOf(
-        "Revenus" to (s.revenueCents.toPrice() to "${s.orders} commande(s) livrée(s)"),
-        "Coûts d'achat" to (s.costCents.toPrice() to "${s.units} unité(s) vendue(s)"),
-        "Marge brute" to (s.grossMarginCents.toPrice() to "Revenus − coûts"),
-        "Dépenses" to (s.expensesCents.toPrice() to "${s.expenseCount} ligne(s)"),
-        "Résultat net" to (s.netCents.toPrice() to "Marge − dépenses"),
+        "Revenus" to ((s.revenueCents ?: 0).toPrice() to "${s.orders ?: 0} commande(s) livrée(s)"),
+        "Coûts d'achat" to ((s.costCents ?: 0).toPrice() to "${s.units ?: 0} unité(s) vendue(s)"),
+        "Marge brute" to ((s.grossMarginCents ?: 0).toPrice() to "Revenus − coûts"),
+        "Dépenses" to ((s.expensesCents ?: 0).toPrice() to "${s.expenseCount ?: 0} ligne(s)"),
+        "Résultat net" to ((s.netCents ?: 0).toPrice() to "Marge − dépenses"),
     )
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         cards.chunked(2).forEach { row ->
@@ -311,20 +312,20 @@ private fun ProductRevenueRow(p: com.shoptabouffe.app.core.models.FinanceProduct
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                p.name,
+                p.name ?: "",
                 style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.weight(1f),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            Text("${p.units}×", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("${p.units ?: 0}×", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.width(8.dp))
-            Text(p.revenueCents.toPrice(), style = MaterialTheme.typography.labelSmall)
+            Text((p.revenueCents ?: 0).toPrice(), style = MaterialTheme.typography.labelSmall)
             Spacer(Modifier.width(8.dp))
             Text(
-                p.marginCents.toPrice(),
+                (p.marginCents ?: 0).toPrice(),
                 style = MaterialTheme.typography.labelSmall,
-                color = if (p.marginCents < 0) MaterialTheme.colorScheme.error else Color(0xFF2E7D32),
+                color = if ((p.marginCents ?: 0) < 0) MaterialTheme.colorScheme.error else Color(0xFF2E7D32),
                 fontWeight = FontWeight.SemiBold,
             )
         }
@@ -342,18 +343,18 @@ private fun SaleRow(sale: com.shoptabouffe.app.core.models.Sale) {
         Column(modifier = Modifier.padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    "Commande #${sale.orderId}",
+                    "Commande #${sale.orderId ?: 0}",
                     style = MaterialTheme.typography.titleSmall,
                     modifier = Modifier.weight(1f),
                 )
                 Text(
-                    sale.totalCents.toPrice(),
+                    (sale.totalCents ?: 0).toPrice(),
                     style = MaterialTheme.typography.titleSmall,
                     color = MaterialTheme.colorScheme.primary,
                 )
             }
             Text(
-                (sale.items ?: emptyList()).joinToString(", ") { "${it.qty}× ${it.name}" },
+                (sale.items ?: emptyList()).joinToString(", ") { "${it.qty ?: 0}× ${it.name ?: ""}" },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 2,
@@ -381,7 +382,7 @@ private fun ExpenseRow(exp: com.shoptabouffe.app.core.models.Expense, onDelete: 
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Text(exp.label, style = MaterialTheme.typography.bodyMedium)
+                Text(exp.label ?: "", style = MaterialTheme.typography.bodyMedium)
                 Text(
                     exp.date ?: "—",
                     style = MaterialTheme.typography.labelSmall,
@@ -389,7 +390,7 @@ private fun ExpenseRow(exp: com.shoptabouffe.app.core.models.Expense, onDelete: 
                 )
             }
             Text(
-                exp.amountCents.toPrice(),
+                (exp.amountCents ?: 0).toPrice(),
                 style = MaterialTheme.typography.titleSmall,
                 color = MaterialTheme.colorScheme.error,
             )

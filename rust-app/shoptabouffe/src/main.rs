@@ -12,7 +12,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 const API_BASE: &str = "https://chorizo.dpdns.org/api";
-const APP_VERSION: &str = "1.0.7";
+const APP_VERSION: &str = "1.0.8";
 
 /* ------------------------------------------------------- palette (Theme.kt) */
 
