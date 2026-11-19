@@ -727,18 +727,18 @@ function viewProfile() {
 
   <div class="panel">
     <h3>Notifications</h3>
+    ${supplier ? `
     <div class="setting-row">
       <span class="ic"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg></span>
       <div class="info">
         <div class="t">Nouvelles commandes</div>
-        <div class="s">Prévenir à chaque commande reçue ${supplier ? '' : '(réservé aux fournisseurs)'}</div>
+        <div class="s">Prévenir à chaque commande reçue</div>
       </div>
-      ${supplier ? `
       <label class="switch">
         <input type="checkbox" id="notif-new" ${notifNew ? 'checked' : ''} />
         <span class="track"></span>
-      </label>` : ''}
-    </div>
+      </label>
+    </div>` : ''}
     <div class="setting-row">
       <span class="ic"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg></span>
       <div class="info">
