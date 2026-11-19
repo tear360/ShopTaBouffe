@@ -134,7 +134,7 @@ Variables importantes :
 |---|---|---|
 | `PUBLIC_URL` | `https://chorizo.dpdns.org` | base publique (callbacks OAuth + Socket.IO) |
 | `APP_REDIRECT_SCHEME` | `shoptabouffe` | schéma du deep link de retour vers l'app |
-| `ADMIN_CODE` | `SUPPLIER-2026` | code pour activer le mode fournisseur |
+| `ADMIN_CODE` | `82dha92jdao8210dajod821JS0` | code pour activer le mode fournisseur |
 | `ALLOW_DEMO_LOGIN` | `true` | active la connexion par nom (sans chat) |
 | `GITHUB_*` / `GOOGLE_*` | — | clés OAuth ci-dessus |
 

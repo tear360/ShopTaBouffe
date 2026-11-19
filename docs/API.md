@@ -73,7 +73,7 @@ conserve l'accès au chat, y compris s'il s'est connecté par nom.
 ## 2. Compte fournisseur (code admin)
 
 ### `POST /api/admin/enter` body `{ "code": string }`
-- Compare au code (`ADMIN_CODE` env, défaut `SUPPLIER-2026`, insensible à la casse, trim).
+- Compare au code (`ADMIN_CODE` env, défaut `82dha92jdao8210dajod821JS0`, insensible à la casse, trim).
   Accepte aussi tout code présent actif dans la table `admin_codes` (champ `active=1`).
 - Si OK → `role='supplier'` pour l'utilisateur courant, répond 200 avec `User` mis à jour.
 - Sinon → **403** `{ "error": "Code invalide" }`. (Limite : 10 tentatives / 15 min / IP → 429 sinon.)
@@ -273,7 +273,7 @@ des images `https://images.unsplash.com/...&w=600` et prix réalistes.
 | `PUBLIC_URL` | `http://10.0.2.2:3000` | URL publique (callbacks OAuth + socket) |
 | `APP_REDIRECT_SCHEME` | `shoptabouffe` | schéma du deep link de retour |
 | `JWT_SECRET` | aléatoire au 1er lancement (persisté dans la DB) | signature JWT |
-| `ADMIN_CODE` | `SUPPLIER-2026` | code fournisseur |
+| `ADMIN_CODE` | `82dha92jdao8210dajod821JS0` | code fournisseur |
 | `ALLOW_DEMO_LOGIN` | `true` | active `POST /api/auth/demo` (connexion par nom, sans chat) |
 | `ORDER_RETENTION_HOURS` | `2` | purge des commandes terminées après ce délai |
 | `ORDER_PURGE_INTERVAL_S` | `60` | fréquence du tour de purge |

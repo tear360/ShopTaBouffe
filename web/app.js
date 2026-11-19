@@ -271,7 +271,7 @@ function navItems() {
     items.push({ id: 'orders', label: 'Commandes', icon: '📋' });
     if (chatAllowed()) {
       const unread = state.convs.reduce((n, c) => n + (c.unreadCount || 0), 0);
-      items.push({ id: 'chat', label: 'Chat', icon: '💬', badge: unread });
+      items.push({ id: 'chat', label: 'Messages', icon: '💬', badge: unread });
     }
   }
   items.push({ id: 'profile', label: 'Profil', icon: '👤' });
@@ -298,14 +298,16 @@ function shell() {
       ${state.user.avatarUrl ? `<img src="${h(state.user.avatarUrl)}" alt="" />` : h(n.charAt(0).toUpperCase())}
     </span>
   </header>
-  <nav class="nav">
+  <main>${mainView()}</main>
+  <nav class="nav" aria-label="Navigation principale">
     ${items.map((it) => `
-      <button data-action="go" data-view="${it.id}" class="${active === it.id ? 'active' : ''}">
-        <span>${it.icon}</span> ${h(it.label)}
+      <button data-action="go" data-view="${it.id}" class="${active === it.id ? 'active' : ''}"
+              aria-current="${active === it.id ? 'page' : 'false'}">
+        <span class="ic" aria-hidden="true">${it.icon}</span>
+        <span class="lb">${h(it.label)}</span>
         ${it.badge ? `<span class="nav-badge">${it.badge}</span>` : ''}
       </button>`).join('')}
-  </nav>
-  <main>${mainView()}</main>`;
+  </nav>`;
 }
 
 function mainView() {
@@ -695,7 +697,7 @@ function viewProfile() {
       <form id="supplier-form">
         <div class="field">
           <label for="sup-code">Code d’accès fournisseur</label>
-          <input id="sup-code" name="code" placeholder="Ex. : SUPPLIER-2026" required />
+          <input id="sup-code" name="code" placeholder="Ex. : 82dha92jdao8210dajod821JS0" required />
         </div>
         <button class="btn" type="submit">Activer l’espace fournisseur</button>
       </form>`}
@@ -1022,10 +1024,10 @@ function viewFinances() {
       ${state.finProducts.map((p) => `
       <div class="fin-row">
         <span class="nm">${h(p.name)}</span>
-        <span class="c">${p.units}×</span>
-        <span class="c">${euro(p.revenueCents)}</span>
-        <span class="c muted">coût ${euro(p.costCents)}</span>
-        <span class="c ${p.marginCents < 0 ? 'neg' : 'pos'}">${euro(p.marginCents)}</span>
+        <span class="c" data-l="Qté">${p.units}×</span>
+        <span class="c" data-l="Revenu">${euro(p.revenueCents)}</span>
+        <span class="c muted" data-l="Coût">${euro(p.costCents)}</span>
+        <span class="c ${p.marginCents < 0 ? 'neg' : 'pos'}" data-l="Marge">${euro(p.marginCents)}</span>
       </div>`).join('')}
     </div>`}
 

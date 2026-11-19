@@ -177,10 +177,10 @@ async function runAll() {
     assert((await api('POST', '/api/orders', { body: {} })).status === 401, 'POST orders sans token != 401');
   });
 
-  await step('POST /api/admin/enter (mauvais code → 403, SUPPLIER-2026 → supplier)', async () => {
+  await step('POST /api/admin/enter (mauvais code → 403, nouveau code → supplier)', async () => {
     const bad = await api('POST', '/api/admin/enter', { token: state.tokenA, body: { code: 'WRONG' } });
     assert(bad.status === 403 && bad.json.error === 'Code invalide', `mauvais code → ${bad.status}`);
-    const r = await api('POST', '/api/admin/enter', { token: state.tokenA, body: { code: '  supplier-2026 ' } });
+    const r = await api('POST', '/api/admin/enter', { token: state.tokenA, body: { code: '  82dha92jdao8210dajod821js0 ' } });
     assert(r.status === 200, `status ${r.status}`);
     assert(r.json.role === 'supplier', `role = ${r.json.role}`);
     const me = await api('GET', '/api/auth/me', { token: state.tokenA });

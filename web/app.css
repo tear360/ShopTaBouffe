@@ -123,25 +123,36 @@ img { max-width: 100%; }
 }
 .avatar img { width: 100%; height: 100%; object-fit: cover; }
 
+/* barre de navigation fixe en bas — identique à l'app Windows / Android */
 .nav {
-  display: flex; gap: 6px; padding: 10px 18px 0; flex-wrap: wrap;
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
+  display: flex; justify-content: center; gap: 2px;
+  padding: 6px 8px calc(8px + env(safe-area-inset-bottom, 0px));
+  background: rgba(11, 12, 17, .95);
+  backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+  border-top: 1px solid var(--border);
 }
 .nav button {
-  display: inline-flex; align-items: center; gap: 7px;
-  padding: 8px 15px; border-radius: 11px 11px 0 0; border: 1px solid transparent;
-  border-bottom: none; background: none; color: var(--muted); cursor: pointer; font-size: 14px;
+  position: relative; flex: 1; max-width: 132px;
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+  padding: 7px 4px 6px; border: none; border-radius: 16px;
+  background: none; color: var(--muted); cursor: pointer; font-size: 11.5px;
+  transition: color .15s, background .15s;
 }
-.nav button:hover { color: var(--text); background: var(--surface); }
-.nav button.active { color: var(--text); background: var(--surface); border-color: var(--border); font-weight: 600; }
+.nav button .ic { font-size: 21px; line-height: 1; }
+.nav button:hover { color: var(--text); background: rgba(255, 255, 255, .04); }
+.nav button.active { color: var(--orange); background: rgba(239, 108, 51, .13); font-weight: 700; }
 .nav .nav-badge {
+  position: absolute; top: 2px; left: calc(50% + 7px);
   min-width: 17px; height: 17px; padding: 0 4px; border-radius: 9px;
   background: var(--orange); color: #fff; font-size: 10.5px; font-weight: 700;
   display: inline-flex; align-items: center; justify-content: center;
+  border: 2px solid var(--bg);
 }
 
 main {
   flex: 1; width: 100%; max-width: 1080px; margin: 0 auto;
-  padding: 18px 18px 40px;
+  padding: 18px 18px 118px;
 }
 .view-title { font-size: 21px; font-weight: 700; margin: 4px 0 16px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .view-title .count { font-size: 13px; color: var(--muted); font-weight: 500; }
@@ -282,7 +293,7 @@ main {
 .meta-row .k { color: var(--muted); }
 
 /* ---------- chat ---------- */
-.chat-wrap { display: flex; flex-direction: column; height: calc(100vh - 160px); min-height: 420px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+.chat-wrap { display: flex; flex-direction: column; height: calc(100vh - 240px); height: calc(100dvh - 240px); min-height: 380px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
 .chat-head { padding: 12px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 11px; }
 .chat-head .nm { font-weight: 700; }
 .chat-head .st { font-size: 12.5px; color: var(--muted); }
@@ -381,7 +392,7 @@ main {
   color: #a8c8f5; border-radius: 11px; padding: 11px 14px; margin-bottom: 14px; font-size: 14px;
 }
 .toast {
-  position: fixed; bottom: 26px; left: 50%; transform: translateX(-50%);
+  position: fixed; bottom: 104px; left: 50%; transform: translateX(-50%);
   background: var(--surface-3); border: 1px solid var(--border); color: var(--text);
   padding: 11px 20px; border-radius: 12px; box-shadow: var(--shadow); z-index: 100;
   font-size: 14.5px; max-width: 90vw; text-align: center;
@@ -434,8 +445,52 @@ main {
 .fin-row .neg { color: var(--red); font-weight: 600; }
 
 @media (max-width: 640px) {
-  .nav { padding: 10px 10px 0; }
-  main { padding: 14px 12px 34px; }
-  .topbar { padding: 9px 12px; }
+  main { padding: 14px 12px 112px; }
+  .topbar { padding: 9px 12px; gap: 10px; }
+  .brand { font-size: 15.5px; }
   .msg { max-width: 86%; }
+  .view-title { font-size: 19px; }
+
+  /* grilles : 2 colonnes de produits sur téléphone */
+  .grid { grid-template-columns: repeat(auto-fill, minmax(min(100%, 152px), 1fr)); gap: 10px; }
+  .card .thumb { height: 104px; font-size: 34px; }
+  .fin-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  .fin-card { padding: 12px 13px; }
+  .fin-card .val { font-size: 18px; }
+
+  /* tableau finances → cartes empilées avec libellés */
+  .fin-row.head { display: none; }
+  .fin-row { grid-template-columns: repeat(4, 1fr); gap: 7px 4px; padding: 11px 12px; }
+  .fin-row .nm { grid-column: 1 / -1; font-weight: 600; font-size: 14px; }
+  .fin-row .c { text-align: center; font-size: 12.5px; }
+  .fin-row .c::before {
+    content: attr(data-l); display: block; font-size: 9.5px; color: var(--muted);
+    text-transform: uppercase; letter-spacing: .3px;
+  }
+
+  .nav button { max-width: none; font-size: 11px; }
+  .nav button .ic { font-size: 20px; }
+
+  .chat-wrap { min-height: 320px; height: calc(100dvh - 210px); }
+  .toolbar .search { min-width: 130px; }
+  .cart-line { flex-wrap: wrap; }
+  .cart-line .info { flex-basis: calc(100% - 70px); }
+  .modal { padding: 18px 16px; border-radius: 16px; }
+  .modal-backdrop { padding: 12px; align-items: flex-end; }
+  .login-card { padding: 26px 20px; }
+  .profile-head { gap: 12px; }
+  .product-admin-row { flex-wrap: wrap; }
+  .product-admin-row .acts { width: 100%; justify-content: flex-end; }
+}
+
+@media (max-width: 380px) {
+  .nav button { font-size: 10px; }
+  .nav button .ic { font-size: 18px; }
+  .grid { grid-template-columns: repeat(2, 1fr); }
+  .fin-grid { grid-template-columns: 1fr 1fr; }
+}
+
+/* grands écrans : on garde la même coque, contenu centré */
+@media (min-width: 1400px) {
+  main { max-width: 1180px; }
 }

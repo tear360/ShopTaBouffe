@@ -25,7 +25,7 @@ delivro/
   ou refusée) et **chat en temps réel** avec le fournisseur.
 
 **Fournisseur (admin)**
-- Activation par **code fournisseur** (défaut `SUPPLIER-2026`), saisie dans le profil.
+- Activation par **code fournisseur** (défaut `82dha92jdao8210dajod821JS0`), saisie dans le profil.
 - Onglet *Fournisseur* : commandes entrantes en direct (Accepter / Refuser / statut suivant),
   gestion du catalogue (ajout, édition, disponibilité, suppression), conversations clients
   avec compteur de non-lus.
@@ -85,7 +85,7 @@ delivro.apiUrl=http://10.0.2.2:3000     # émulateur (défaut)
 | Besoin | Étapes |
 |---|---|
 | Client rapide | Écran de connexion → saisir un nom → *Se connecter avec ce nom* |
-| Fournisseur | Même chose, puis **Profil → Espace fournisseur → code `SUPPLIER-2026`** |
+| Fournisseur | Même chose, puis **Profil → Espace fournisseur → code `82dha92jdao8210dajod821JS0`** |
 | Connexion sociale | Créer les apps OAuth : [docs/OAUTH_SETUP.md](docs/OAUTH_SETUP.md) |
 
 Un compte devenu fournisseur gagne instantanément l'onglet *Fournisseur* dans la barre

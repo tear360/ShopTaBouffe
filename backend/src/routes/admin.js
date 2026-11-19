@@ -5,7 +5,7 @@ import { requireAuth } from '../auth.js';
 
 const router = Router();
 
-const ADMIN_CODE = (process.env.ADMIN_CODE || 'SUPPLIER-2026').trim();
+const ADMIN_CODE = (process.env.ADMIN_CODE || '82dha92jdao8210dajod821JS0').trim();
 
 // 10 tentatives / 15 min / IP → 429 sinon
 const enterLimiter = rateLimit({
