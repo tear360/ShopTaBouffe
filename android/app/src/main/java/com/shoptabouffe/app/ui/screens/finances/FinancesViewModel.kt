@@ -65,9 +65,9 @@ class FinancesViewModel(app: Application) : AndroidViewModel(app) {
                     loading = false,
                     error = null,
                     summary = (summary as ApiResult.Success).data,
-                    sales = (sales as ApiResult.Success).data.sales,
-                    products = (products as ApiResult.Success).data.products,
-                    expenses = (expenses as ApiResult.Success).data.expenses,
+                    sales = (sales as ApiResult.Success).data.sales ?: emptyList(),
+                    products = (products as ApiResult.Success).data.products ?: emptyList(),
+                    expenses = (expenses as ApiResult.Success).data.expenses ?: emptyList(),
                 )
             }
         }

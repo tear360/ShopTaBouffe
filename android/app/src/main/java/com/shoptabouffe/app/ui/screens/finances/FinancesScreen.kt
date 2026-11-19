@@ -353,7 +353,7 @@ private fun SaleRow(sale: com.shoptabouffe.app.core.models.Sale) {
                 )
             }
             Text(
-                sale.items.joinToString(", ") { "${it.qty}× ${it.name}" },
+                (sale.items ?: emptyList()).joinToString(", ") { "${it.qty}× ${it.name}" },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 2,
