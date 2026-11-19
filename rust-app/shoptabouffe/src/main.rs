@@ -6,6 +6,7 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use std::thread;
 
 const API_BASE: &str = "https://chorizo.dpdns.org/api";
+const APP_VERSION: &str = "1.0.5";
 const ORANGE: egui::Color32 = egui::Color32::from_rgb(239, 108, 51);
 const SURFACE: egui::Color32 = egui::Color32::from_rgb(24, 24, 30);
 const SURFACE2: egui::Color32 = egui::Color32::from_rgb(34, 34, 42);
@@ -54,6 +55,7 @@ enum Msg {
     Conversations(Vec<Conversation>),
     Messages(i64, Vec<ChatMessage>),
     MessageSent,
+    UpdateAvailable(String, String),
     Error(String),
     Notice(String),
 }
@@ -89,6 +91,8 @@ struct ShopApp {
     new_prod_desc: String,
     new_prod_available: bool,
     supplier_code: String,
+    update_version: Option<String>,
+    update_url: Option<String>,
     rx: Receiver<Msg>,
     tx: Sender<Msg>,
 }
@@ -99,6 +103,25 @@ struct CartLine { product: Product, qty: i64 }
 impl Default for ShopApp {
     fn default() -> Self {
         let (tx, rx) = channel();
+        // Auto-update check
+        let txu = tx.clone();
+        thread::spawn(move || {
+            #[derive(Deserialize)] struct Asset { name: String, browser_download_url: String }
+            #[derive(Deserialize)] struct Rel { tag_name: String, assets: Vec<Asset> }
+            let url = "https://api.github.com/repos/tear360/ShopTaBouffe/releases/latest";
+            if let Ok(r) = reqwest::blocking::Client::new().get(url).header("User-Agent", "ShopTaBouffe").send() {
+                if r.status().is_success() {
+                    if let Ok(rel) = r.json::<Rel>() {
+                        let ver = rel.tag_name.trim_start_matches('v').to_string();
+                        if ver != APP_VERSION {
+                            if let Some(a) = rel.assets.into_iter().find(|a| a.name.ends_with(".exe")) {
+                                let _ = txu.send(Msg::UpdateAvailable(ver, a.browser_download_url));
+                            }
+                        }
+                    }
+                }
+            }
+        });
         Self {
             screen: Screen::Login, token: None, user: None,
             name_input: String::new(), busy: false, notice: None,
@@ -108,6 +131,7 @@ impl Default for ShopApp {
             new_cat: String::new(), new_exp_label: String::new(), new_exp_amount: String::new(), new_exp_date: String::new(),
             new_prod_name: String::new(), new_prod_price: String::new(), new_prod_cost: String::new(), new_prod_category: String::new(), new_prod_desc: String::new(), new_prod_available: true,
             supplier_code: String::new(),
+            update_version: None, update_url: None,
             rx, tx,
         }
     }
@@ -384,6 +408,7 @@ impl eframe::App for ShopApp {
                 Msg::Conversations(c) => { self.conversations = c; }
                 Msg::Messages(id, m) => { if self.chat_id == Some(id) { self.chat_messages = m; } }
                 Msg::MessageSent => { if let Some(id) = self.chat_id { if let Some(t) = self.token.clone() { fetch_messages(self.tx.clone(), t, id); } } }
+                Msg::UpdateAvailable(v, u) => { self.update_version = Some(v); self.update_url = Some(u); }
                 Msg::Notice(n) => { self.notice = Some(n); }
                 Msg::Error(e) => { self.notice = Some(e); self.busy = false; }
             }
@@ -404,6 +429,27 @@ impl eframe::App for ShopApp {
                     }
                 });
             });
+            // Auto-update banner
+            if let (Some(v), Some(u)) = (self.update_version.clone(), self.update_url.clone()) {
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new(format!("Mise à jour disponible : v{}", v)).color(ORANGE).strong());
+                    if ui.button("Télécharger et installer").clicked() {
+                        let url = u.clone();
+                        let tx = self.tx.clone();
+                        thread::spawn(move || {
+                            let path = std::env::temp_dir().join("ShopTaBouffe-Update.exe");
+                            if let Ok(r) = reqwest::blocking::Client::new().get(&url).send() {
+                                if let Ok(bytes) = r.bytes() {
+                                    if std::fs::write(&path, &bytes).is_ok() {
+                                        let _ = std::process::Command::new(&path).spawn();
+                                        let _ = tx.send(Msg::Notice("Mise à jour lancée".into()));
+                                    }
+                                }
+                            }
+                        });
+                    }
+                });
+            }
             if self.user.is_some() {
                 ui.add_space(2.0);
                 ui.horizontal(|ui| {
