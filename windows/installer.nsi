@@ -5,7 +5,7 @@
 ; Compilation : makensis installer.nsi   (depuis windows\, après npm run dist)
 
 !define APP_NAME "ShopTaBouffe"
-!define APP_VERSION "1.0.4"
+!define APP_VERSION "1.0.6"
 !define APP_PUBLISHER "tear360"
 !define APP_URL "https://chorizo.dpdns.org"
 !define SRC_DIR "dist\ShopTaBouffe-win32-x64"

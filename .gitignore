@@ -1,6 +1,7 @@
 # dépendances / builds
 node_modules/
 .gradle/
+.kotlin/
 build/
 local.properties
 *.iml
