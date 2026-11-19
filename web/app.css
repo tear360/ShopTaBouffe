@@ -31,6 +31,7 @@ body {
 button, input, textarea, select { font: inherit; color: inherit; }
 a { color: var(--orange); text-decoration: none; }
 img { max-width: 100%; }
+.ic { width: 1em; height: 1em; vertical-align: -0.125em; display: inline-block; }
 
 #app { min-height: 100%; display: flex; flex-direction: column; }
 
