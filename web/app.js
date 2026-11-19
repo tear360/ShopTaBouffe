@@ -29,16 +29,47 @@ const STEPS = [
   ['delivered', 'Livrée', 'Commande livrée — merci !'],
 ];
 
-const EMOJI = {
-  Pizza: '🍕', Burger: '🍔', Sushi: '🍣', Dessert: '🍰', Boisson: '🥤',
-  Sandwich: '🥪', Salade: '🥗', Snack: '🍟', Plat: '🍽️', 'Épicerie': '🛒',
+/* Icônes SVG inline (pas d'emoji) — dessinées au trait, héritent de la couleur du texte. */
+const ICONS = {
+  store: '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l1-5h16l1 5"/><path d="M5 9v11h14V9"/><path d="M9 20v-6h6v6"/></svg>',
+  box: '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>',
+  wallet: '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12V8H6a2 2 0 0 1 0-4h12v4"/><path d="M4 6v12a2 2 0 0 0 2 2h14v-4"/><path d="M18 12a2 2 0 0 0 0 4h4v-4z"/></svg>',
+  cart: '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg>',
+  receipt: '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1z"/><line x1="8" y1="7" x2="16" y2="7"/><line x1="8" y1="11" x2="16" y2="11"/><line x1="8" y1="15" x2="13" y2="15"/></svg>',
+  chat: '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>',
+  person: '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>',
+  search: '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>',
+  trash: '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>',
+  edit: '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>',
+  plus: '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>',
+  minus: '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/></svg>',
+  lock: '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>',
+  chart: '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>',
+  pin: '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>',
+  phone: '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>',
+  note: '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/></svg>',
+  refresh: '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>',
+  back: '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>',
+  send: '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>',
+  check: '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>',
+  warn: '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
+  wave: '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>',
+  close: '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>',
+  calendar: '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>',
+  arrow: '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>',
+  bag: '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/></svg>',
+  logout: '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>',
+  tag: '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>',
+  success: '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>',
 };
 
-const ISSUES_URL = 'https://github.com/tear360/ShopTaBouffe/issues/new';
+function emojiFor(category) { return ICONS.box; }
+
+function icon(name) { return ICONS[name] || ''; }
 
 const PROVIDER_LABELS = { github: 'GitHub', google: 'Google', demo: 'Invité' };
 
-/* Logos OAuth (SVG inline → lisibles sur fond sombre comme sur clair). */
+/* Logos OAuth (SVG inline <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg> lisibles sur fond sombre comme sur clair). */
 const LOGO_GOOGLE = `<svg class="plogo" viewBox="0 0 24 24" aria-hidden="true">
   <path fill="#4285F4" d="M23.49 12.27c0-.79-.07-1.54-.19-2.27H12v4.51h6.47c-.29 1.48-1.14 2.73-2.4 3.58v3h3.86c2.26-2.09 3.56-5.17 3.56-8.82z"/>
   <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.86-3c-1.08.72-2.45 1.16-4.07 1.16-3.13 0-5.78-2.11-6.73-4.96H1.29v3.09C3.26 21.3 7.31 24 12 24z"/>
@@ -113,7 +144,7 @@ function avatarHtml(user, cls) {
   return `<span class="avatar ${cls || ''}">${url ? `<img src="${h(url)}" alt="" />` : initial}</span>`;
 }
 
-function emojiFor(category) { return EMOJI[category] || '🍽️'; }
+function emojiFor(category) { return EMOJI[category] || ''; }
 
 /** Noms de catégories : table `categories` du serveur, repli sur la liste par défaut. */
 function categoryNames() {
@@ -227,7 +258,7 @@ function viewLogin() {
   return `
   <div class="login-wrap">
     <div class="login-card">
-      <div class="login-logo">🛍️</div>
+      <div class="login-logo">${ICONS.bag}</div>
       <h1>ShopTaBouffe</h1>
       <p class="sub">Commandez chez vos commerçants locaux</p>
       ${err ? `<div class="login-error">${h(err)}</div>` : ''}
@@ -261,38 +292,34 @@ function chatAllowed() { return state.user != null; }
 
 function navItems() {
   const items = [
-    { id: 'gallery', label: 'Boutique', icon: '🏪' },
+    { id: 'gallery', label: 'Boutique', icon: ICONS.store },
   ];
   if (isSupplier()) {
-    items.push({ id: 'admin', label: 'Produits', icon: '📦' });
-    items.push({ id: 'finances', label: 'Finances', icon: '💰' });
+    items.push({ id: 'admin', label: 'Produits', icon: ICONS.box });
+    items.push({ id: 'finances', label: 'Finances', icon: ICONS.wallet });
   } else {
-    items.push({ id: 'cart', label: 'Panier', icon: '🛒', badge: cartCount() });
-    items.push({ id: 'orders', label: 'Commandes', icon: '📋' });
-    if (chatAllowed()) {
-      const unread = state.convs.reduce((n, c) => n + (c.unreadCount || 0), 0);
-      items.push({ id: 'chat', label: 'Messages', icon: '💬', badge: unread });
-    }
+    items.push({ id: 'cart', label: 'Panier', icon: ICONS.cart, badge: cartCount() });
+    items.push({ id: 'orders', label: 'Commandes', icon: ICONS.receipt });
   }
-  items.push({ id: 'profile', label: 'Profil', icon: '👤' });
+  items.push({ id: 'profile', label: 'Profil', icon: ICONS.person });
   return items;
 }
 
 function shell() {
   const items = navItems();
   const active = state.view === 'orderDetail' ? 'orders'
-    : state.view === 'chatThread' ? (isSupplier() ? 'admin' : 'chat')
+    : state.view === 'chatThread' ? (isSupplier() ? 'admin' : 'orders')
     : state.view;
   const n = state.user.name || '?';
   return `
   <header class="topbar">
     <div class="brand" data-action="go" data-view="gallery">
-      <span class="logo">🛍️</span> ShopTaBouffe
+      <span class="logo">${ICONS.bag}</span> ShopTaBouffe
     </div>
     <div class="spacer"></div>
     ${!isSupplier() ? `
     <button class="icon-btn" data-action="go" data-view="cart" title="Panier">
-      🛒${cartCount() ? `<span class="badge">${cartCount()}</span>` : ''}
+      ${ICONS.cart}${cartCount() ? `<span class="badge">${cartCount()}</span>` : ''}
     </button>` : ''}
     <span class="avatar" data-action="go" data-view="profile" title="${h(n)}">
       ${state.user.avatarUrl ? `<img src="${h(state.user.avatarUrl)}" alt="" />` : h(n.charAt(0).toUpperCase())}
@@ -381,11 +408,11 @@ function viewGallery() {
   return `
   <div class="view-title">Boutique <span class="count">${list.length} produit(s)</span>
     <span style="flex:1"></span>
-    <button class="btn btn-ghost btn-sm" data-action="refresh">↻ Rafraîchir</button>
+    <button class="btn btn-ghost btn-sm" data-action="refresh"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg> Rafraîchir</button>
   </div>
   <div class="toolbar">
     <div class="search">
-      <span class="mag">🔍</span>
+      <span class="mag"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></span>
       <input id="search-input" placeholder="Rechercher un produit…" value="${h(state.search)}" />
     </div>
   </div>
@@ -399,7 +426,7 @@ function viewGallery() {
   ${state.error ? `<div class="error-box">${h(state.error)}</div>` : ''}
   ${list.length === 0 ? `
     <div class="empty">
-      <div class="big">🔎</div>
+      <div class="big">${ICONS.box}</div>
       <div class="t">Aucun produit trouvé</div>
       <div>Essayez une autre recherche ou une autre catégorie.</div>
     </div>` : `
@@ -415,7 +442,7 @@ function viewCart() {
     return `
     <div class="view-title">Panier</div>
     <div class="empty">
-      <div class="big">🛒</div>
+      <div class="big">${ICONS.box}</div>
       <div class="t">Votre panier est vide</div>
       <div>Ajoutez des produits depuis la boutique.</div>
       <p style="margin-top:16px"><button class="btn btn-sm" data-action="go" data-view="gallery">Voir la boutique</button></p>
@@ -437,7 +464,7 @@ function viewCart() {
             <span class="n">${l.qty}</span>
             <button data-action="cart-inc" data-id="${l.productId}">+</button>
           </span>
-          <button class="icon-btn" data-action="cart-del" data-id="${l.productId}" title="Supprimer">🗑</button>
+          <button class="icon-btn" data-action="cart-del" data-id="${l.productId}" title="Supprimer"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg></button>
         </div>`).join('')}
     </div>
     <div class="panel">
@@ -492,7 +519,7 @@ function orderCard(o) {
     <div class="items">${h(items)}</div>
     <div class="foot">
       <span class="price">${euro(o.totalCents)}</span>
-      <span class="btn btn-ghost btn-sm">Voir le détail →</span>
+      <span class="btn btn-ghost btn-sm">Voir le détail <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></span>
     </div>
   </div>`;
 }
@@ -502,7 +529,7 @@ function viewOrders() {
   return `
   <div class="view-title">Mes commandes <span class="count">${list.length} commande(s)</span>
     <span style="flex:1"></span>
-    <button class="btn btn-ghost btn-sm" data-action="refresh">↻ Rafraîchir</button>
+    <button class="btn btn-ghost btn-sm" data-action="refresh"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg> Rafraîchir</button>
   </div>
   <div class="chips">
     ${ORDER_FILTERS.map(([id, label]) => `
@@ -511,7 +538,7 @@ function viewOrders() {
   ${state.error ? `<div class="error-box">${h(state.error)}</div>` : ''}
   ${list.length === 0 ? `
     <div class="empty">
-      <div class="big">📋</div>
+      <div class="big">${ICONS.box}</div>
       <div class="t">Aucune commande</div>
       <div>Vos commandes apparaîtront ici.</div>
     </div>` : list.map(orderCard).join('')}`;
@@ -520,13 +547,13 @@ function viewOrders() {
 function viewOrderDetail() {
   const o = state.order;
   if (!o) {
-    return `<div class="empty"><div class="big">⏳</div><div class="t">Chargement…</div></div>`;
+    return `<div class="empty"><div class="big">${ICONS.box}</div><div class="t">Chargement…</div></div>`;
   }
   const refused = o.status === 'refused';
   const idx = refused ? -1 : STEPS.findIndex((s) => s[0] === o.status);
   return `
   <div class="view-title">
-    <button class="icon-btn" data-action="go" data-view="orders" title="Retour">←</button>
+    <button class="icon-btn" data-action="go" data-view="orders" title="Retour"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg></button>
     Commande #${o.id}
     <span class="status ${o.status}">${STATUS[o.status] || o.status}</span>
   </div>
@@ -535,12 +562,12 @@ function viewOrderDetail() {
     <div class="panel">
       <h3>Suivi</h3>
       ${refused ? `
-        <div class="error-box">❌ Cette commande a été refusée par le fournisseur.</div>` : `
+        <div class="error-box"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg> Cette commande a été refusée par le fournisseur.</div>` : `
         <div class="steps">
           ${STEPS.map((s, i) => `
             <div class="step ${i <= idx ? 'done' : ''} ${i === idx ? 'current' : ''}">
               <div class="rail">
-                <div class="dot">${i <= idx ? '✓' : i + 1}</div>
+                <div class="dot">${i <= idx ? '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>' : i + 1}</div>
                 <div class="line"></div>
               </div>
               <div class="txt">
@@ -565,7 +592,7 @@ function viewOrderDetail() {
       <div class="meta-row"><span class="k">Commandée le</span><span>${fmtDate(o.createdAt)}</span></div>
       <div class="meta-row"><span class="k">Mise à jour</span><span>${fmtDate(o.updatedAt)}</span></div>
       ${chatAllowed() ? `<p style="margin-top:14px">
-        <button class="btn btn-ghost" data-action="go" data-view="chat">💬 Discuter avec le vendeur</button>
+        <button class="btn btn-ghost" data-action="go" data-view="chat"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg> Discuter avec le vendeur</button>
       </p>` : ''}
     </div>
   </div>`;
@@ -578,7 +605,7 @@ function viewChatList() {
     return `
     <div class="view-title">Chat</div>
     <div class="empty chat-blocked">
-      <div class="big">🔒</div>
+      <div class="big">${ICONS.box}</div>
       <div class="t">Chat réservé</div>
       <div>Chat réservé aux comptes connectés via GitHub ou Google.</div>
       <p style="margin-top:16px">
@@ -594,11 +621,11 @@ function viewChatList() {
   return `
   <div class="view-title">Chat <span class="count">${list.length} discussion(s)</span>
     <span style="flex:1"></span>
-    <button class="btn btn-ghost btn-sm" data-action="refresh">↻ Rafraîchir</button>
+    <button class="btn btn-ghost btn-sm" data-action="refresh"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg> Rafraîchir</button>
   </div>
   ${list.length === 0 ? `
     <div class="empty">
-      <div class="big">💬</div>
+      <div class="big">${ICONS.box}</div>
       <div class="t">Aucune discussion</div>
       <div>Une conversation avec le vendeur sera créée automatiquement.</div>
     </div>` : `
@@ -620,7 +647,7 @@ function viewChatThread() {
   const other = conv && conv.customer ? conv.customer : state.user;
   return `
   <div class="view-title">
-    <button class="icon-btn" data-action="go" data-view="${isSupplier() ? 'admin' : 'chat'}" title="Retour">←</button>
+    <button class="icon-btn" data-action="go" data-view="${isSupplier() ? 'admin' : 'orders'}" title="Retour"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg></button>
     Discussion
   </div>
   ${state.chatError ? `<div class="error-box">${h(state.chatError)}</div>` : ''}
@@ -635,7 +662,7 @@ function viewChatThread() {
     <div class="chat-body" id="chat-body">
       ${state.messages.length === 0 ? `
         <div class="empty" style="padding:30px 10px">
-          <div class="big">👋</div>
+          <div class="big">${ICONS.box}</div>
           <div class="t">Dites bonjour !</div>
           <div>Envoyez le premier message.</div>
         </div>` : state.messages.map((m) => {
@@ -651,7 +678,7 @@ function viewChatThread() {
     <form class="chat-input" id="chat-form">
       <input id="chat-msg" maxlength="1000" placeholder="Écrivez un message…"
              autocomplete="off" ${state.sending ? 'disabled' : ''} />
-      <button type="submit" title="Envoyer" ${state.sending ? 'disabled' : ''}>➤</button>
+      <button type="submit" title="Envoyer" ${state.sending ? 'disabled' : ''}><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg></button>
     </form>
   </div>`;
 }
@@ -679,7 +706,7 @@ function viewProfile() {
     <h3>Espace fournisseur</h3>
     ${supplier ? `
       <div class="setting-row">
-        <span class="ic">✅</span>
+        <span class="ic"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg></span>
         <div class="info">
           <div class="t">Vous êtes fournisseur</div>
           <div class="s">Vos commandes entrantes et votre catalogue sont dans l’onglet Espace fournisseur.</div>
@@ -687,7 +714,7 @@ function viewProfile() {
         <button class="btn btn-ghost btn-sm" data-action="go" data-view="admin">Ouvrir</button>
       </div>
       <div class="setting-row">
-        <span class="ic">↩️</span>
+        <span class="ic"></span>
         <div class="info">
           <div class="t">Quitter le rôle fournisseur</div>
           <div class="s">Revenir à un compte client classique.</div>
@@ -706,7 +733,7 @@ function viewProfile() {
   <div class="panel">
     <h3>Notifications</h3>
     <div class="setting-row">
-      <span class="ic">🔔</span>
+      <span class="ic"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg></span>
       <div class="info">
         <div class="t">Nouvelles commandes</div>
         <div class="s">Prévenir à chaque commande reçue ${supplier ? '' : '(réservé aux fournisseurs)'}</div>
@@ -718,7 +745,7 @@ function viewProfile() {
       </label>` : ''}
     </div>
     <div class="setting-row">
-      <span class="ic">📦</span>
+      <span class="ic"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg></span>
       <div class="info">
         <div class="t">Suivi de mes commandes</div>
         <div class="s">Prévenir quand le statut de ma commande change</div>
@@ -733,7 +760,7 @@ function viewProfile() {
   <div class="panel">
     <h3>Application</h3>
     <div class="setting-row">
-      <span class="ic">🛠️</span>
+      <span class="ic"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg></span>
       <div class="info">
         <div class="t">Signaler un problème</div>
         <div class="s">Ouvre les tickets GitHub du projet</div>
@@ -741,14 +768,14 @@ function viewProfile() {
       <a class="btn btn-ghost btn-sm" href="${ISSUES_URL}" target="_blank" rel="noreferrer">Ouvrir</a>
     </div>
     <div class="setting-row">
-      <span class="ic">ℹ️</span>
+      <span class="ic">ℹ</span>
       <div class="info">
         <div class="t">Version</div>
         <div class="s">ShopTaBouffe 1.0.2 · Windows</div>
       </div>
     </div>
     <div class="setting-row">
-      <span class="ic">🚪</span>
+      <span class="ic"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg></span>
       <div class="info">
         <div class="t">Se déconnecter</div>
         <div class="s">Vos commandes restent conservées</div>
@@ -761,7 +788,7 @@ function viewProfile() {
 /* ---------------- Espace fournisseur ---------------- */
 
 const ADMIN_TABS = [
-  ['orders', 'Commandes', '📋'], ['products', 'Produits', '🍕'], ['convs', 'Conversations', '💬'],
+  ['orders', 'Commandes', ICONS.receipt], ['products', 'Produits', ICONS.box], ['convs', 'Conversations', ICONS.chat],
 ];
 const ADMIN_FILTERS = [
   ['all', 'Toutes'], ['pending', 'Nouvelles'], ['active', 'En cours'], ['done', 'Terminées'],
@@ -784,12 +811,12 @@ function adminOrderCard(o) {
       <span class="price">${euro(o.totalCents)}</span>
     </div>
     <div class="items">${h(items)}</div>
-    ${o.address ? `<div class="addr">📍 ${h(o.address)} · ☎ ${h(o.phone || '')}</div>` : ''}
-    ${o.note ? `<div class="addr">📝 ${h(o.note)}</div>` : ''}
+    ${o.address ? `<div class="addr"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg> ${h(o.address)} · <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg> ${h(o.phone || '')}</div>` : ''}
+    ${o.note ? `<div class="addr"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/></svg> ${h(o.note)}</div>` : ''}
     <div class="actions">
       ${next.map(([st, label, cls]) => `
         <button class="btn btn-sm ${cls}" data-action="set-status" data-id="${o.id}" data-status="${st}">${label}</button>`).join('')}
-      ${chatAllowed() ? `<button class="btn btn-ghost btn-sm" data-action="open-conv-of" data-id="${o.id}">💬 Ouvrir le chat</button>` : ''}
+      ${chatAllowed() ? `<button class="btn btn-ghost btn-sm" data-action="open-conv-of" data-id="${o.id}"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg> Ouvrir le chat</button>` : ''}
     </div>
   </div>`;
 }
@@ -799,7 +826,7 @@ function viewAdmin() {
     return `
     <div class="view-title">Produits</div>
     <div class="empty">
-      <div class="big">🔒</div>
+      <div class="big">${ICONS.box}</div>
       <div class="t">Accès réservé aux fournisseurs</div>
       <div>Activez votre espace fournisseur depuis le Profil avec votre code d’accès.</div>
       <p style="margin-top:16px"><button class="btn btn-sm" data-action="go" data-view="profile">Aller au Profil</button></p>
@@ -815,7 +842,7 @@ function viewAdmin() {
       </div>
       ${list.length === 0 ? `
         <div class="empty">
-          <div class="big">📦</div>
+          <div class="big">${ICONS.box}</div>
           <div class="t">Aucune commande</div>
           <div>Les nouvelles commandes arrivent ici en temps réel.</div>
         </div>` : list.map(adminOrderCard).join('')}`;
@@ -823,12 +850,12 @@ function viewAdmin() {
     content = `
       <div class="toolbar">
         <span style="flex:1"></span>
-        <button class="btn btn-ghost btn-sm" data-action="cats-open">🏷️ Gérer les catégories</button>
+        <button class="btn btn-ghost btn-sm" data-action="cats-open"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg> Gérer les catégories</button>
         <button class="btn btn-sm" data-action="product-new">＋ Ajouter un produit</button>
       </div>
       ${state.adminProducts.length === 0 ? `
         <div class="empty">
-          <div class="big">🍕</div>
+          <div class="big">${ICONS.box}</div>
           <div class="t">Aucun produit</div>
           <div>Ajoutez votre premier produit au catalogue.</div>
         </div>` : state.adminProducts.map((p) => `
@@ -839,14 +866,14 @@ function viewAdmin() {
             <div class="sub">${euro(p.priceCents)} · ${h(p.category)}</div>
           </div>
           <div class="acts">
-            <button class="btn btn-ghost btn-sm" data-action="product-edit" data-id="${p.id}">✏️</button>
-            <button class="btn btn-danger btn-sm" data-action="product-del" data-id="${p.id}">🗑</button>
+            <button class="btn btn-ghost btn-sm" data-action="product-edit" data-id="${p.id}"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>
+            <button class="btn btn-danger btn-sm" data-action="product-del" data-id="${p.id}"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg></button>
           </div>
         </div>`).join('')}`;
   } else {
     content = state.adminConvs.length === 0 ? `
       <div class="empty">
-        <div class="big">💬</div>
+        <div class="big">${ICONS.box}</div>
         <div class="t">Aucune conversation</div>
         <div>Les clients peuvent vous écrire depuis l’onglet Chat.</div>
       </div>` : `
@@ -904,8 +931,8 @@ function openCategoriesModal() {
           <div class="cat-row">
             <span class="nm">${emojiFor(c.name)} ${h(c.name)}</span>
             <span class="cnt">${c.productsCount} produit(s)</span>
-            <button class="btn btn-ghost btn-sm" type="button" data-ren="${c.id}" title="Renommer">✏️</button>
-            <button class="btn btn-danger btn-sm" type="button" data-del="${c.id}" title="Supprimer">🗑</button>
+            <button class="btn btn-ghost btn-sm" type="button" data-ren="${c.id}" title="Renommer"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>
+            <button class="btn btn-danger btn-sm" type="button" data-del="${c.id}" title="Supprimer"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg></button>
           </div>`).join('')}
       </div>
       <div class="actions">
@@ -969,7 +996,7 @@ function viewFinances() {
     return `
     <div class="view-title">Finances</div>
     <div class="empty">
-      <div class="big">🔒</div>
+      <div class="big">${ICONS.box}</div>
       <div class="t">Accès réservé aux fournisseurs</div>
       <div>Activez votre espace fournisseur depuis le Profil.</div>
     </div>`;
@@ -988,15 +1015,15 @@ function viewFinances() {
   <div class="view-title">Finances
     <span class="count">${state.finSales.length} vente(s) affichée(s)</span>
     <span style="flex:1"></span>
-    <button class="btn btn-ghost btn-sm" data-action="refresh">↻ Rafraîchir</button>
+    <button class="btn btn-ghost btn-sm" data-action="refresh"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg> Rafraîchir</button>
   </div>
   <div class="toolbar">
     <div class="search" style="max-width:none;flex:1">
-      <span class="mag">📅</span>
+      <span class="mag"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></span>
       <input type="date" id="fin-from" value="${h(state.finFrom)}" title="Du" />
     </div>
     <div class="search" style="max-width:none;flex:1">
-      <span class="mag">→</span>
+      <span class="mag"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></span>
       <input type="date" id="fin-to" value="${h(state.finTo)}" title="Au" />
     </div>
     <button class="btn btn-sm" data-action="fin-apply">Appliquer</button>
@@ -1014,7 +1041,7 @@ function viewFinances() {
 
   <h3 class="sec-title">Revenus par produit</h3>
   ${state.finProducts.length === 0 ? `
-    <div class="empty"><div class="big">📊</div><div class="t">Aucune vente encore</div>
+    <div class="empty"><div class="big">${ICONS.box}</div><div class="t">Aucune vente encore</div>
     <div>Les ventes livrées apparaîtront ici avec la marge par produit.</div></div>` : `
     <div class="fin-table">
       <div class="fin-row head">
@@ -1033,7 +1060,7 @@ function viewFinances() {
 
   <h3 class="sec-title">Ventes récentes</h3>
   ${state.finSales.length === 0 ? `
-    <div class="empty"><div class="big">🧾</div><div class="t">Aucune vente</div>
+    <div class="empty"><div class="big">${ICONS.box}</div><div class="t">Aucune vente</div>
     <div>Le journal est écrit à chaque livraison et conservé (il survit à la purge de 2 h).</div></div>` : `
     <div class="conv-list">
       ${state.finSales.map((sale) => `
@@ -1049,7 +1076,7 @@ function viewFinances() {
   <h3 class="sec-title">Dépenses</h3>
   <form id="expense-form" class="toolbar">
     <div class="search" style="max-width:none;flex:2">
-      <span class="mag">📝</span>
+      <span class="mag"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/></svg></span>
       <input name="label" maxlength="120" placeholder="Libellé (ex. Loyer, Carburant…)" required />
     </div>
     <div class="search" style="max-width:none;flex:1">
@@ -1060,7 +1087,7 @@ function viewFinances() {
     <button class="btn btn-sm" type="submit">Ajouter</button>
   </form>
   ${state.expenses.length === 0 ? `
-    <div class="empty"><div class="big">💳</div><div class="t">Aucune dépense</div>
+    <div class="empty"><div class="big">${ICONS.box}</div><div class="t">Aucune dépense</div>
     <div>Ajoutez vos charges pour calculer le résultat net.</div></div>` : `
     <div class="conv-list">
       ${state.expenses.map((e) => `
@@ -1070,7 +1097,7 @@ function viewFinances() {
           <div class="last">${e.date}</div>
         </div>
         <span class="price">${euro(e.amountCents)}</span>
-        <button class="btn btn-danger btn-sm" data-action="exp-del" data-id="${e.id}" title="Supprimer">🗑</button>
+        <button class="btn btn-danger btn-sm" data-action="exp-del" data-id="${e.id}" title="Supprimer"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg></button>
       </div>`).join('')}
     </div>`}`;
 }
@@ -1319,7 +1346,7 @@ function connectSocket() {
     if (isSupplier()) {
       loadAdminOrders().then(render);
       if (localStorage.getItem('stb_notif_new') !== '0') {
-        toast('🔔 Nouvelle commande #' + (payload && payload.id) + ' !', 'ok');
+        toast('<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg> Nouvelle commande #' + (payload && payload.id) + ' !', 'ok');
         notify('Nouvelle commande', 'Commande #' + (payload && payload.id) + ' reçue.');
       }
     }
@@ -1337,7 +1364,7 @@ function connectSocket() {
       };
       refresh();
       if (localStorage.getItem('stb_notif_mine') !== '0') {
-        toast('📦 Commande #' + payload.id + ' : ' + (STATUS[payload.status] || payload.status), 'ok');
+        toast('<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg> Commande #' + payload.id + ' : ' + (STATUS[payload.status] || payload.status), 'ok');
         notify('Mise à jour de commande', 'Commande #' + payload.id + ' — ' + (STATUS[payload.status] || payload.status));
       }
     }
@@ -1371,7 +1398,7 @@ function connectSocket() {
       if (isSupplier()) loadAdminConversations().then(render);
       else loadConversations().then(render);
       if (state.user && msg.senderId !== state.user.id) {
-        toast('💬 Nouveau message de ' + (msg.senderName || '…'), 'ok');
+        toast('<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg> Nouveau message de ' + (msg.senderName || '…'), 'ok');
         notify('Nouveau message', (msg.senderName || '') + ' : ' + msg.body.slice(0, 80));
       }
     }
@@ -1418,7 +1445,7 @@ async function go(view, param) {
     await loadOrder(param);
   } else if (view === 'chat') {
     await loadConversations();
-    // client : un seul fil → ouverture directe du thread
+    // client : un seul fil <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg> ouverture directe du thread
     if (!isSupplier() && !state.chatBlocked && state.convs.length > 0) {
       await openConversation(state.convs[0].id, state.convs[0]);
     }
@@ -1465,7 +1492,7 @@ async function refresh() {
   else if (v === 'admin') await loadAdmin();
   else if (v === 'finances') await loadFinances();
   render();
-  toast('À jour ✓', 'ok');
+  toast('À jour <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>', 'ok');
 }
 
 /* ---------------- Actions panier ---------------- */
@@ -1662,7 +1689,7 @@ document.addEventListener('submit', async (e) => {
       state.cart = [];
       saveCart();
       state.error = null;
-      toast('✅ Commande #' + order.id + ' envoyée !', 'ok');
+      toast('<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg> Commande #' + order.id + ' envoyée !', 'ok');
       await go('orderDetail', order.id);
     } catch (err) {
       btn.disabled = false;
@@ -1719,7 +1746,7 @@ document.addEventListener('submit', async (e) => {
     const code = String(new FormData(e.target).get('code') || '').trim();
     try {
       state.user = await api('/admin/enter', { method: 'POST', body: { code } });
-      toast('Espace fournisseur activé 🎉', 'ok');
+      toast('Espace fournisseur activé ', 'ok');
       await loadConversations();
       await go('admin');
     } catch (err) {
