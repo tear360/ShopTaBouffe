@@ -1,3 +1,5 @@
+#![windows_subsystem = "windows"]
+
 use eframe::egui;
 use serde::{Deserialize, Serialize};
 use std::sync::mpsc::{channel, Receiver, Sender};
@@ -428,15 +430,6 @@ impl ShopApp {
             if ui.button("Continuer avec GitHub").clicked() {
                 let _ = open::that("https://chorizo.dpdns.org/api/auth/start?provider=github&target=web");
             }
-            ui.add_space(10.0);
-            ui.label("Ou coller un token obtenu via le navigateur :");
-            ui.text_edit_singleline(&mut self.token_paste);
-            if ui.button("Utiliser ce token").clicked() && !self.token_paste.trim().is_empty() {
-                self.token = Some(self.token_paste.trim().to_string());
-                self.screen = Screen::Boutique;
-                fetch_products(self.tx.clone(), self.token.clone());
-                fetch_categories(self.tx.clone(), self.token.clone());
-            }
         });
     }
 
@@ -657,5 +650,19 @@ fn main() -> eframe::Result<()> {
         viewport: egui::ViewportBuilder::default().with_inner_size([1180.0, 760.0]),
         ..Default::default()
     };
-    eframe::run_native("ShopTaBouffe", options, Box::new(|_cc| Ok(Box::new(ShopApp::default()))))
+    eframe::run_native("ShopTaBouffe", options, Box::new(|cc| {
+        // Thème sombre avec accent orange (cohérent avec Android).
+        let mut style = (*cc.egui_ctx.style()).clone();
+        style.visuals = egui::Visuals::dark();
+        style.visuals.widgets.noninteractive.bg_fill = egui::Color32::from_rgb(28, 28, 34);
+        style.visuals.widgets.inactive.bg_fill = egui::Color32::from_rgb(40, 40, 48);
+        style.visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(55, 55, 65);
+        style.visuals.widgets.active.bg_fill = egui::Color32::from_rgb(239, 108, 51);
+        style.visuals.selection.bg_fill = egui::Color32::from_rgb(239, 108, 51);
+        style.visuals.hyperlink_color = egui::Color32::from_rgb(239, 108, 51);
+        style.spacing.item_spacing = egui::vec2(8.0, 6.0);
+        style.spacing.button_padding = egui::vec2(10.0, 6.0);
+        cc.egui_ctx.set_style(style);
+        Ok(Box::new(ShopApp::default()))
+    }))
 }
