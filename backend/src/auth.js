@@ -43,7 +43,14 @@ export function requireAuth(req, res, next) {
   }
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(payload.sub);
   if (!user) return res.status(401).json({ error: 'Utilisateur introuvable' });
+  // Sécurité : pour les comptes démo (par nom), le statut fournisseur est
+  // lié à la session (token), pas au compte → pas de propagation entre appareils.
+  if (user.provider === 'demo') {
+    const sess = db.prepare('SELECT 1 FROM supplier_sessions WHERE token = ?').get(match[1]);
+    user.role = sess ? 'supplier' : 'customer';
+  }
   req.user = user;
+  req.token = match[1];
   next();
 }
 

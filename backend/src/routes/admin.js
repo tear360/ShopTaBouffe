@@ -26,15 +26,32 @@ router.post('/enter', requireAuth, enterLimiter, (req, res) => {
     .prepare('SELECT id FROM admin_codes WHERE active = 1 AND LOWER(TRIM(code)) = ?')
     .get(normalized);
   if (!matchEnv && !matchDb) return res.status(403).json({ error: 'Code invalide' });
-  db.prepare("UPDATE users SET role = 'supplier' WHERE id = ?").run(req.user.id);
+  const isDemo = req.user && req.user.provider === 'demo';
+  if (isDemo) {
+    // Statut fournisseur lié à la session (token) : pas de propagation entre appareils.
+    db.prepare('INSERT OR REPLACE INTO supplier_sessions (token, user_id, created_at) VALUES (?, ?, ?)').run(
+      req.token,
+      req.user.id,
+      new Date().toISOString()
+    );
+  } else {
+    db.prepare("UPDATE users SET role = 'supplier' WHERE id = ?").run(req.user.id);
+  }
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
+  if (isDemo) user.role = 'supplier';
   return res.json(toUser(user));
 });
 
 /** POST /api/admin/logout-role → remet role=customer */
 router.post('/logout-role', requireAuth, (req, res) => {
-  db.prepare("UPDATE users SET role = 'customer' WHERE id = ?").run(req.user.id);
+  const isDemo = req.user && req.user.provider === 'demo';
+  if (isDemo) {
+    db.prepare('DELETE FROM supplier_sessions WHERE token = ?').run(req.token);
+  } else {
+    db.prepare("UPDATE users SET role = 'customer' WHERE id = ?").run(req.user.id);
+  }
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
+  if (isDemo) user.role = 'customer';
   return res.json(toUser(user));
 });
 
