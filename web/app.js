@@ -144,8 +144,6 @@ function avatarHtml(user, cls) {
   return `<span class="avatar ${cls || ''}">${url ? `<img src="${h(url)}" alt="" />` : initial}</span>`;
 }
 
-function emojiFor(category) { return EMOJI[category] || ''; }
-
 /** Noms de catégories : table `categories` du serveur, repli sur la liste par défaut. */
 function categoryNames() {
   if (state.categories.length) return state.categories.map((c) => c.name);
