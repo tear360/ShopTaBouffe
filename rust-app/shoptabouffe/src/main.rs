@@ -6,6 +6,10 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use std::thread;
 
 const API_BASE: &str = "https://chorizo.dpdns.org/api";
+const ORANGE: egui::Color32 = egui::Color32::from_rgb(239, 108, 51);
+const SURFACE: egui::Color32 = egui::Color32::from_rgb(24, 24, 30);
+const SURFACE2: egui::Color32 = egui::Color32::from_rgb(34, 34, 42);
+const TEXT_MUTED: egui::Color32 = egui::Color32::from_rgb(155, 163, 178);
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 struct User { id: i64, name: String, role: String, #[serde(rename="avatarUrl")] avatar_url: Option<String> }
@@ -59,7 +63,6 @@ struct ShopApp {
     token: Option<String>,
     user: Option<User>,
     name_input: String,
-    token_paste: String,
     busy: bool,
     notice: Option<String>,
     products: Vec<Product>,
@@ -75,7 +78,6 @@ struct ShopApp {
     chat_id: Option<i64>,
     chat_messages: Vec<ChatMessage>,
     chat_input: String,
-    // forms
     new_cat: String,
     new_exp_label: String,
     new_exp_amount: String,
@@ -87,7 +89,6 @@ struct ShopApp {
     new_prod_desc: String,
     new_prod_available: bool,
     supplier_code: String,
-    // async
     rx: Receiver<Msg>,
     tx: Sender<Msg>,
 }
@@ -100,7 +101,7 @@ impl Default for ShopApp {
         let (tx, rx) = channel();
         Self {
             screen: Screen::Login, token: None, user: None,
-            name_input: String::new(), token_paste: String::new(), busy: false, notice: None,
+            name_input: String::new(), busy: false, notice: None,
             products: vec![], search: String::new(), category: None, cart: vec![], orders: vec![],
             admin_tab: 0, summary: None, expenses: vec![], categories: vec![], conversations: vec![],
             chat_id: None, chat_messages: vec![], chat_input: String::new(),
@@ -113,8 +114,6 @@ impl Default for ShopApp {
 }
 
 // ---------- HTTP helpers ----------
-
-fn bearer(token: &Option<String>) -> Option<String> { token.clone() }
 
 fn fetch_products(tx: Sender<Msg>, token: Option<String>) {
     thread::spawn(move || {
@@ -341,6 +340,36 @@ fn delete_product(tx: Sender<Msg>, token: String, id: i64) {
     });
 }
 
+// ---------- UI helpers ----------
+
+fn card(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui)) {
+    egui::Frame::new()
+        .fill(SURFACE)
+        .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(45, 45, 55)))
+        .corner_radius(egui::CornerRadius::same(12))
+        .inner_margin(egui::Margin::same(12))
+        .show(ui, |ui| add(ui));
+}
+
+fn section_title(ui: &mut egui::Ui, text: &str) {
+    ui.add_space(4.0);
+    ui.label(egui::RichText::new(text).size(15.0).strong().color(egui::Color32::WHITE));
+    ui.add_space(4.0);
+}
+
+fn empty_state(ui: &mut egui::Ui, icon: &str, title: &str, msg: &str) {
+    ui.vertical_centered(|ui| {
+        ui.add_space(40.0);
+        ui.label(egui::RichText::new(icon).size(48.0));
+        ui.add_space(8.0);
+        ui.label(egui::RichText::new(title).size(16.0).strong());
+        ui.label(egui::RichText::new(msg).size(13.0).color(TEXT_MUTED));
+        ui.add_space(40.0);
+    });
+}
+
+fn cents(c: i64) -> String { format!("{}.{:02} €", c / 100, (c % 100).abs()) }
+
 impl eframe::App for ShopApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         while let Ok(m) = self.rx.try_recv() {
@@ -354,18 +383,20 @@ impl eframe::App for ShopApp {
                 Msg::Categories(c) => { self.categories = c; }
                 Msg::Conversations(c) => { self.conversations = c; }
                 Msg::Messages(id, m) => { if self.chat_id == Some(id) { self.chat_messages = m; } }
-                Msg::MessageSent => { if let Some(id) = self.chat_id { fetch_messages(self.tx.clone(), self.token.clone().unwrap_or_default(), id); } }
+                Msg::MessageSent => { if let Some(id) = self.chat_id { if let Some(t) = self.token.clone() { fetch_messages(self.tx.clone(), t, id); } } }
                 Msg::Notice(n) => { self.notice = Some(n); }
                 Msg::Error(e) => { self.notice = Some(e); self.busy = false; }
             }
         }
 
+        // Top bar
         egui::TopBottomPanel::top("top").show(ctx, |ui| {
+            ui.add_space(4.0);
             ui.horizontal(|ui| {
-                ui.heading("ShopTaBouffe");
+                ui.label(egui::RichText::new("🛍️ ShopTaBouffe").size(18.0).strong().color(ORANGE));
                 if let Some(u) = &self.user {
-                    ui.label(format!("· {}", u.name));
-                    if u.is_supplier() { ui.label("(fournisseur)"); }
+                    ui.label(egui::RichText::new(format!("  ·  {}", u.name)).color(TEXT_MUTED));
+                    if u.is_supplier() { ui.label(egui::RichText::new(" (fournisseur)").color(TEXT_MUTED).size(12.0)); }
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if self.user.is_some() && ui.button("Déconnexion").clicked() {
@@ -374,6 +405,7 @@ impl eframe::App for ShopApp {
                 });
             });
             if self.user.is_some() {
+                ui.add_space(2.0);
                 ui.horizontal(|ui| {
                     let mut tabs: Vec<(&str, Screen)> = vec![("Boutique", Screen::Boutique), ("Panier", Screen::Cart), ("Commandes", Screen::Orders), ("Profil", Screen::Profile)];
                     if self.user.as_ref().unwrap().is_supplier() {
@@ -388,11 +420,16 @@ impl eframe::App for ShopApp {
                         if ui.selectable_label(selected, label).clicked() { self.screen = scr; }
                     }
                 });
+                ui.add_space(4.0);
             }
         });
 
         if let Some(n) = self.notice.clone() {
-            egui::TopBottomPanel::bottom("notice").show(ctx, |ui| { ui.label(n); });
+            egui::TopBottomPanel::bottom("notice").show(ctx, |ui| {
+                ui.add_space(4.0);
+                ui.label(egui::RichText::new(n).color(ORANGE));
+                ui.add_space(4.0);
+            });
             self.notice = None;
         }
 
@@ -414,27 +451,41 @@ impl eframe::App for ShopApp {
 impl ShopApp {
     fn ui_login(&mut self, ui: &mut egui::Ui) {
         ui.vertical_centered(|ui| {
-            ui.heading("Connexion");
-            ui.add_space(10.0);
-            ui.label("Votre nom");
-            ui.text_edit_singleline(&mut self.name_input);
-            if ui.button("Se connecter avec ce nom").clicked() && !self.name_input.trim().is_empty() {
-                self.busy = true;
-                demo_login(self.tx.clone(), self.name_input.trim().to_string());
-            }
-            ui.add_space(10.0);
-            ui.label("ou continuer avec");
-            if ui.button("Continuer avec Google").clicked() {
-                let _ = open::that("https://chorizo.dpdns.org/api/auth/start?provider=google&target=web");
-            }
-            if ui.button("Continuer avec GitHub").clicked() {
-                let _ = open::that("https://chorizo.dpdns.org/api/auth/start?provider=github&target=web");
-            }
+            ui.add_space(60.0);
+            ui.label(egui::RichText::new("🛍️").size(56.0));
+            ui.add_space(8.0);
+            ui.label(egui::RichText::new("ShopTaBouffe").size(28.0).strong().color(ORANGE));
+            ui.label(egui::RichText::new("Commandez chez vos commerçants locaux").color(TEXT_MUTED));
+            ui.add_space(30.0);
+            card(ui, |ui| {
+                ui.label(egui::RichText::new("Votre nom").strong());
+                ui.text_edit_singleline(&mut self.name_input);
+                ui.add_space(8.0);
+                if ui.button("Se connecter avec ce nom").clicked() && !self.name_input.trim().is_empty() {
+                    self.busy = true;
+                    demo_login(self.tx.clone(), self.name_input.trim().to_string());
+                }
+            });
+            ui.add_space(16.0);
+            ui.label(egui::RichText::new("ou continuer avec").color(TEXT_MUTED));
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                if ui.button("Continuer avec Google").clicked() {
+                    let _ = open::that("https://chorizo.dpdns.org/api/auth/start?provider=google&target=web");
+                }
+                if ui.button("Continuer avec GitHub").clicked() {
+                    let _ = open::that("https://chorizo.dpdns.org/api/auth/start?provider=github&target=web");
+                }
+            });
         });
     }
 
     fn ui_boutique(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| { ui.label("Rechercher"); ui.text_edit_singleline(&mut self.search); });
+        ui.horizontal(|ui| {
+            ui.label("🔍");
+            ui.text_edit_singleline(&mut self.search);
+            if ui.button("↻").clicked() { fetch_products(self.tx.clone(), self.token.clone()); }
+        });
         let cats: Vec<String> = {
             let mut s: std::collections::BTreeSet<String> = self.products.iter().map(|p| p.category.clone()).collect();
             s.into_iter().collect()
@@ -446,24 +497,37 @@ impl ShopApp {
                 if ui.selectable_label(sel, c).clicked() { self.category = Some(c.clone()); }
             }
         });
-        if ui.button("Rafraîchir").clicked() { fetch_products(self.tx.clone(), self.token.clone()); }
         ui.separator();
         egui::ScrollArea::vertical().show(ui, |ui| {
             let search = self.search.to_lowercase();
             let cat = self.category.clone();
             let mut to_add: Option<i64> = None;
+            let mut count = 0;
             for p in &self.products {
                 if !search.is_empty() && !p.name.to_lowercase().contains(&search) { continue; }
                 if let Some(c) = &cat { if p.category != *c { continue; } }
-                ui.group(|ui| {
-                    ui.label(&p.name);
-                    ui.label(format!("{} · {}", p.category, cents(p.price_cents)));
-                    if p.available {
-                        if ui.button("+ Panier").clicked() { to_add = Some(p.id); }
-                    } else { ui.label("Indisponible"); }
+                count += 1;
+                card(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        // image placeholder
+                        let (rect, _) = ui.allocate_exact_size(egui::vec2(54.0, 54.0), egui::Sense::hover());
+                        ui.painter().rect_filled(rect, 8.0, SURFACE2);
+                        ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, "🍽️", egui::FontId::proportional(24.0), TEXT_MUTED);
+                        ui.vertical(|ui| {
+                            ui.label(egui::RichText::new(&p.name).strong());
+                            ui.label(egui::RichText::new(format!("{} · {}", p.category, cents(p.price_cents))).color(TEXT_MUTED).size(12.0));
+                            if !p.available {
+                                ui.label(egui::RichText::new("Indisponible").color(egui::Color32::from_rgb(220, 80, 80)).size(11.0));
+                            }
+                        });
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if p.available && ui.button("+").clicked() { to_add = Some(p.id); }
+                        });
+                    });
                 });
-                ui.add_space(4.0);
+                ui.add_space(6.0);
             }
+            if count == 0 { empty_state(ui, "🛒", "Aucun produit", "Aucun produit ne correspond."); }
             if let Some(id) = to_add {
                 if let Some(p) = self.products.iter().find(|x| x.id == id).cloned() {
                     if let Some(line) = self.cart.iter_mut().find(|l| l.product.id == id) { line.qty += 1; }
@@ -474,54 +538,87 @@ impl ShopApp {
     }
 
     fn ui_cart(&mut self, ui: &mut egui::Ui) {
-        if self.cart.is_empty() { ui.label("Panier vide"); return; }
+        if self.cart.is_empty() { empty_state(ui, "🛒", "Panier vide", "Ajoutez des produits depuis la boutique."); return; }
         let mut total: i64 = 0;
         let mut remove: Option<usize> = None;
-        for (i, line) in self.cart.iter_mut().enumerate() {
-            ui.horizontal(|ui| {
-                ui.label(&line.product.name);
-                ui.label(format!("×{}", line.qty));
-                ui.label(cents(line.product.price_cents * line.qty));
-                if ui.button("−").clicked() && line.qty > 1 { line.qty -= 1; }
-                if ui.button("+").clicked() { line.qty += 1; }
-                if ui.button("🗑").clicked() { remove = Some(i); }
-            });
-            total += line.product.price_cents * line.qty;
-        }
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            for (i, line) in self.cart.iter_mut().enumerate() {
+                card(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.vertical(|ui| {
+                            ui.label(egui::RichText::new(&line.product.name).strong());
+                            ui.label(egui::RichText::new(cents(line.product.price_cents)).color(TEXT_MUTED).size(12.0));
+                        });
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.label(egui::RichText::new(cents(line.product.price_cents * line.qty)).strong());
+                            if ui.button("🗑").clicked() { remove = Some(i); }
+                            if ui.button("+").clicked() { line.qty += 1; }
+                            ui.label(format!("{}", line.qty));
+                            if ui.button("−").clicked() && line.qty > 1 { line.qty -= 1; }
+                        });
+                    });
+                });
+                ui.add_space(6.0);
+                total += line.product.price_cents * line.qty;
+            }
+        });
         if let Some(i) = remove { self.cart.remove(i); }
-        ui.separator();
-        ui.label(format!("Total : {}", cents(total)));
+        ui.add_space(8.0);
+        card(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new("Total").strong());
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.label(egui::RichText::new(cents(total)).size(18.0).strong().color(ORANGE));
+                });
+            });
+        });
+        ui.add_space(8.0);
         if ui.button("Passer la commande").clicked() {
             self.notice = Some("Commande (API à brancher)".into());
         }
     }
 
     fn ui_orders(&mut self, ui: &mut egui::Ui) {
-        if ui.button("Rafraîchir").clicked() { if let Some(t) = self.token.clone() { fetch_orders(self.tx.clone(), t); } }
+        if ui.button("↻ Rafraîchir").clicked() { if let Some(t) = self.token.clone() { fetch_orders(self.tx.clone(), t); } }
+        ui.add_space(4.0);
+        if self.orders.is_empty() { empty_state(ui, "📋", "Aucune commande", "Les nouvelles commandes apparaîtront ici."); return; }
         egui::ScrollArea::vertical().show(ui, |ui| {
             for o in &self.orders {
-                ui.group(|ui| {
-                    ui.label(format!("#{} · {} · {}", o.id, o.status, cents(o.total_cents)));
-                    if let Some(c) = &o.customer { ui.label(c.name.clone().unwrap_or_default()); }
+                card(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new(format!("#{}", o.id)).strong());
+                        ui.label(egui::RichText::new(&o.status).color(status_color(&o.status)));
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.label(egui::RichText::new(cents(o.total_cents)).strong().color(ORANGE));
+                        });
+                    });
+                    if let Some(c) = &o.customer { ui.label(egui::RichText::new(c.name.clone().unwrap_or_default()).color(TEXT_MUTED).size(12.0)); }
                     ui.label(o.items.iter().map(|i| format!("{}× {}", i.qty, i.name)).collect::<Vec<_>>().join(", "));
+                    if let Some(n) = &o.note { ui.label(egui::RichText::new(format!("📝 {}", n)).color(TEXT_MUTED).size(12.0)); }
                 });
-                ui.add_space(4.0);
+                ui.add_space(6.0);
             }
         });
     }
 
     fn ui_profile(&mut self, ui: &mut egui::Ui) {
         if let Some(u) = &self.user {
-            ui.label(format!("Nom : {}", u.name));
-            ui.label(format!("Rôle : {}", u.role));
+            card(ui, |ui| {
+                ui.label(egui::RichText::new(&u.name).size(18.0).strong());
+                ui.label(egui::RichText::new(format!("Rôle : {}", u.role)).color(TEXT_MUTED));
+            });
+            ui.add_space(8.0);
             if !u.is_supplier() {
-                ui.label("Code fournisseur :");
-                ui.text_edit_singleline(&mut self.supplier_code);
-                if ui.button("Devenir fournisseur").clicked() {
-                    if let Some(t) = self.token.clone() {
-                        enter_supplier(self.tx.clone(), t, self.supplier_code.clone());
+                card(ui, |ui| {
+                    ui.label(egui::RichText::new("Devenir fournisseur").strong());
+                    ui.label(egui::RichText::new("Entrez votre code d'accès").color(TEXT_MUTED).size(12.0));
+                    ui.text_edit_singleline(&mut self.supplier_code);
+                    if ui.button("Valider").clicked() && !self.supplier_code.trim().is_empty() {
+                        if let Some(t) = self.token.clone() {
+                            enter_supplier(self.tx.clone(), t, self.supplier_code.clone());
+                        }
                     }
-                }
+                });
             }
         }
     }
@@ -535,81 +632,154 @@ impl ShopApp {
         ui.separator();
         match self.admin_tab {
             0 => {
-                if ui.button("Rafraîchir").clicked() { if let Some(t)=self.token.clone(){fetch_orders(self.tx.clone(),t);} }
-                for o in &self.orders { ui.label(format!("#{} {}", o.id, o.status)); }
+                if ui.button("↻ Rafraîchir").clicked() { if let Some(t)=self.token.clone(){fetch_orders(self.tx.clone(),t);} }
+                ui.add_space(4.0);
+                if self.orders.is_empty() { empty_state(ui, "📋", "Aucune commande", "Les nouvelles commandes apparaîtront ici."); return; }
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    for o in &self.orders {
+                        card(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                ui.label(egui::RichText::new(format!("#{}", o.id)).strong());
+                                ui.label(egui::RichText::new(&o.status).color(status_color(&o.status)));
+                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                    ui.label(egui::RichText::new(cents(o.total_cents)).strong().color(ORANGE));
+                                });
+                            });
+                            if let Some(c) = &o.customer { ui.label(egui::RichText::new(c.name.clone().unwrap_or_default()).color(TEXT_MUTED).size(12.0)); }
+                            ui.label(o.items.iter().map(|i| format!("{}× {}", i.qty, i.name)).collect::<Vec<_>>().join(", "));
+                        });
+                        ui.add_space(6.0);
+                    }
+                });
             }
             1 => {
-                ui.label("Nouveau produit :");
-                ui.text_edit_singleline(&mut self.new_prod_name);
-                ui.horizontal(|ui| { ui.label("Prix"); ui.text_edit_singleline(&mut self.new_prod_price); ui.label("Coût"); ui.text_edit_singleline(&mut self.new_prod_cost); });
-                ui.text_edit_singleline(&mut self.new_prod_category);
-                ui.checkbox(&mut self.new_prod_available, "Disponible");
-                if ui.button("Ajouter").clicked() {
-                    let price = self.new_prod_price.replace(',',".").parse::<f64>().unwrap_or(0.0);
-                    let cost = self.new_prod_cost.replace(',',".").parse::<f64>().unwrap_or(0.0);
-                    if let Some(t) = self.token.clone() {
-                        create_product(self.tx.clone(), t, self.new_prod_name.clone(), None, (price*100.0) as i64, (cost*100.0) as i64, self.new_prod_category.clone(), self.new_prod_available);
+                card(ui, |ui| {
+                    ui.label(egui::RichText::new("Nouveau produit").strong());
+                    ui.text_edit_singleline(&mut self.new_prod_name);
+                    ui.horizontal(|ui| { ui.label("Prix"); ui.text_edit_singleline(&mut self.new_prod_price); ui.label("Coût"); ui.text_edit_singleline(&mut self.new_prod_cost); });
+                    ui.text_edit_singleline(&mut self.new_prod_category);
+                    ui.checkbox(&mut self.new_prod_available, "Disponible");
+                    if ui.button("Ajouter").clicked() {
+                        let price = self.new_prod_price.replace(',',".").parse::<f64>().unwrap_or(0.0);
+                        let cost = self.new_prod_cost.replace(',',".").parse::<f64>().unwrap_or(0.0);
+                        if let Some(t) = self.token.clone() {
+                            create_product(self.tx.clone(), t, self.new_prod_name.clone(), if self.new_prod_desc.is_empty(){None}else{Some(self.new_prod_desc.clone())}, (price*100.0) as i64, (cost*100.0) as i64, self.new_prod_category.clone(), self.new_prod_available);
+                        }
                     }
-                }
-                ui.separator();
-                if ui.button("Rafraîchir").clicked() { fetch_products(self.tx.clone(), self.token.clone()); }
-                for p in &self.products { ui.horizontal(|ui| { ui.label(&p.name); ui.label(cents(p.price_cents)); if ui.button("🗑").clicked() { if let Some(t)=self.token.clone(){delete_product(self.tx.clone(),t,p.id);} } }); }
+                });
+                ui.add_space(6.0);
+                if ui.button("↻ Rafraîchir").clicked() { fetch_products(self.tx.clone(), self.token.clone()); }
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    for p in &self.products {
+                        card(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                ui.vertical(|ui| {
+                                    ui.label(egui::RichText::new(&p.name).strong());
+                                    ui.label(egui::RichText::new(format!("{} · {}", p.category, cents(p.price_cents))).color(TEXT_MUTED).size(12.0));
+                                    if !p.available { ui.label(egui::RichText::new("Indisponible").color(egui::Color32::from_rgb(220,80,80)).size(11.0)); }
+                                });
+                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                    if ui.button("🗑").clicked() { if let Some(t)=self.token.clone(){delete_product(self.tx.clone(),t,p.id);} }
+                                });
+                            });
+                        });
+                        ui.add_space(6.0);
+                    }
+                });
             }
             _ => {
-                ui.label("Nouvelle catégorie :");
-                ui.horizontal(|ui| { ui.text_edit_singleline(&mut self.new_cat); if ui.button("Ajouter").clicked() && !self.new_cat.trim().is_empty() { if let Some(t)=self.token.clone(){create_category(self.tx.clone(),t,self.new_cat.clone()); self.new_cat.clear();} } });
-                ui.separator();
-                if ui.button("Rafraîchir").clicked() { fetch_categories(self.tx.clone(), self.token.clone()); }
-                for c in &self.categories {
+                card(ui, |ui| {
+                    ui.label(egui::RichText::new("Nouvelle catégorie").strong());
                     ui.horizontal(|ui| {
-                        ui.label(&c.name);
-                        ui.label(format!("{} produit(s)", c.products_count));
-                        if ui.button("Renommer").clicked() { self.notice = Some(format!("Renommer {} (à implémenter)", c.name)); }
-                        if ui.button("🗑").clicked() { if let Some(t)=self.token.clone(){delete_category(self.tx.clone(),t,c.id);} }
+                        ui.text_edit_singleline(&mut self.new_cat);
+                        if ui.button("Ajouter").clicked() && !self.new_cat.trim().is_empty() {
+                            if let Some(t)=self.token.clone(){ create_category(self.tx.clone(),t,self.new_cat.clone()); self.new_cat.clear(); }
+                        }
                     });
-                }
+                });
+                ui.add_space(6.0);
+                if ui.button("↻ Rafraîchir").clicked() { fetch_categories(self.tx.clone(), self.token.clone()); }
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    for c in &self.categories {
+                        card(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                ui.label(egui::RichText::new(&c.name).strong());
+                                ui.label(egui::RichText::new(format!("{} produit(s)", c.products_count)).color(TEXT_MUTED).size(12.0));
+                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                    if ui.button("🗑").clicked() { if let Some(t)=self.token.clone(){delete_category(self.tx.clone(),t,c.id);} }
+                                });
+                            });
+                        });
+                        ui.add_space(6.0);
+                    }
+                });
             }
         }
     }
 
     fn ui_finances(&mut self, ui: &mut egui::Ui) {
-        if ui.button("Rafraîchir").clicked() { if let Some(t)=self.token.clone(){fetch_summary(self.tx.clone(),t.clone()); fetch_expenses(self.tx.clone(),t);} }
+        if ui.button("↻ Rafraîchir").clicked() { if let Some(t)=self.token.clone(){fetch_summary(self.tx.clone(),t.clone()); fetch_expenses(self.tx.clone(),t);} }
+        ui.add_space(4.0);
         if let Some(s) = &self.summary {
-            ui.horizontal(|ui| {
-                for (label, val) in [("Revenus", s.revenue_cents), ("Coûts", s.cost_cents), ("Marge", s.gross_margin_cents), ("Dépenses", s.expenses_cents), ("Net", s.net_cents)] {
-                    ui.group(|ui| { ui.label(label); ui.label(cents(val)); });
+            ui.horizontal_wrapped(|ui| {
+                for (label, val, sub) in [("Revenus", s.revenue_cents, format!("{} commande(s)", s.orders)),
+                    ("Coûts", s.cost_cents, format!("{} unité(s)", s.units)),
+                    ("Marge", s.gross_margin_cents, "Revenus − coûts".into()),
+                    ("Dépenses", s.expenses_cents, format!("{} ligne(s)", s.expense_count)),
+                    ("Net", s.net_cents, "Marge − dépenses".into())] {
+                    card(ui, |ui| {
+                        ui.label(egui::RichText::new(label).size(11.0).color(TEXT_MUTED));
+                        ui.label(egui::RichText::new(cents(val)).size(16.0).strong().color(if label=="Net" { ORANGE } else { egui::Color32::WHITE }));
+                        ui.label(egui::RichText::new(sub).size(10.0).color(TEXT_MUTED));
+                    });
                 }
             });
         }
-        ui.separator();
-        ui.label("Nouvelle dépense :");
-        ui.horizontal(|ui| { ui.label("Libellé"); ui.text_edit_singleline(&mut self.new_exp_label); ui.label("Montant"); ui.text_edit_singleline(&mut self.new_exp_amount); ui.label("Date"); ui.text_edit_singleline(&mut self.new_exp_date); });
-        if ui.button("Ajouter").clicked() && !self.new_exp_label.trim().is_empty() {
-            let amt = self.new_exp_amount.replace(',',".").parse::<f64>().unwrap_or(0.0);
-            if let Some(t) = self.token.clone() {
-                create_expense(self.tx.clone(), t, self.new_exp_label.clone(), (amt*100.0) as i64, if self.new_exp_date.is_empty(){None}else{Some(self.new_exp_date.clone())});
-                self.new_exp_label.clear(); self.new_exp_amount.clear(); self.new_exp_date.clear();
+        ui.add_space(8.0);
+        section_title(ui, "Nouvelle dépense");
+        card(ui, |ui| {
+            ui.horizontal(|ui| { ui.label("Libellé"); ui.text_edit_singleline(&mut self.new_exp_label); });
+            ui.horizontal(|ui| { ui.label("Montant"); ui.text_edit_singleline(&mut self.new_exp_amount); ui.label("Date"); ui.text_edit_singleline(&mut self.new_exp_date); });
+            if ui.button("Ajouter").clicked() && !self.new_exp_label.trim().is_empty() {
+                let amt = self.new_exp_amount.replace(',',".").parse::<f64>().unwrap_or(0.0);
+                if let Some(t) = self.token.clone() {
+                    create_expense(self.tx.clone(), t, self.new_exp_label.clone(), (amt*100.0) as i64, if self.new_exp_date.is_empty(){None}else{Some(self.new_exp_date.clone())});
+                    self.new_exp_label.clear(); self.new_exp_amount.clear(); self.new_exp_date.clear();
+                }
             }
-        }
-        ui.separator();
-        ui.label("Dépenses :");
-        for e in &self.expenses {
-            ui.horizontal(|ui| { ui.label(&e.label); ui.label(cents(e.amount_cents)); if ui.button("🗑").clicked() { if let Some(t)=self.token.clone(){delete_expense(self.tx.clone(),t,e.id);} } });
-        }
+        });
+        ui.add_space(8.0);
+        section_title(ui, "Dépenses");
+        if self.expenses.is_empty() { empty_state(ui, "💳", "Aucune dépense", "Ajoutez vos charges pour calculer le résultat net."); return; }
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            for e in &self.expenses {
+                card(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.vertical(|ui| {
+                            ui.label(egui::RichText::new(&e.label).strong());
+                            ui.label(egui::RichText::new(e.date.clone().unwrap_or_default()).color(TEXT_MUTED).size(11.0));
+                        });
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.label(egui::RichText::new(cents(e.amount_cents)).color(egui::Color32::from_rgb(220,80,80)).strong());
+                            if ui.button("🗑").clicked() { if let Some(t)=self.token.clone(){delete_expense(self.tx.clone(),t,e.id);} }
+                        });
+                    });
+                });
+                ui.add_space(6.0);
+            }
+        });
     }
 
     fn ui_chat(&mut self, ui: &mut egui::Ui) {
-        if self.conversations.is_empty() {
-            if ui.button("Charger").clicked() { if let Some(t)=self.token.clone(){fetch_conversations(self.tx.clone(),t);} }
-        }
+        if self.conversations.is_empty() && ui.button("Charger").clicked() { if let Some(t)=self.token.clone(){fetch_conversations(self.tx.clone(),t);} }
         ui.horizontal(|ui| {
-            // left: conversation list
             ui.vertical(|ui| {
-                ui.label("Conversations");
+                ui.label(egui::RichText::new("Conversations").strong());
                 egui::ScrollArea::vertical().max_height(600.0).show(ui, |ui| {
                     for c in &self.conversations {
                         let sel = self.chat_id == Some(c.id);
-                        if ui.selectable_label(sel, c.customer.as_ref().and_then(|x| x.name.clone()).unwrap_or_else(|| format!("#{}", c.id))).clicked() {
+                        let name = c.customer.as_ref().and_then(|x| x.name.clone()).unwrap_or_else(|| format!("#{}", c.id));
+                        if ui.selectable_label(sel, name).clicked() {
                             self.chat_id = Some(c.id);
                             if let Some(t) = self.token.clone() { fetch_messages(self.tx.clone(), t, c.id); }
                         }
@@ -617,13 +787,13 @@ impl ShopApp {
                 });
             });
             ui.separator();
-            // right: thread
             ui.vertical(|ui| {
                 if let Some(id) = self.chat_id {
-                    ui.label(format!("Conversation #{}", id));
+                    ui.label(egui::RichText::new(format!("Conversation #{}", id)).strong());
                     egui::ScrollArea::vertical().max_height(500.0).show(ui, |ui| {
                         for m in &self.chat_messages {
-                            ui.label(&m.body);
+                            card(ui, |ui| { ui.label(&m.body); });
+                            ui.add_space(4.0);
                         }
                     });
                     ui.horizontal(|ui| {
@@ -636,32 +806,41 @@ impl ShopApp {
                         }
                     });
                 } else {
-                    ui.label("Sélectionne une conversation");
+                    empty_state(ui, "💬", "Aucune conversation", "Sélectionnez une conversation à gauche.");
                 }
             });
         });
     }
 }
 
-fn cents(c: i64) -> String { format!("{}.{:02} €", c / 100, (c % 100).abs()) }
+fn status_color(s: &str) -> egui::Color32 {
+    match s {
+        "pending" => egui::Color32::from_rgb(250, 204, 21),
+        "accepted" | "preparing" => egui::Color32::from_rgb(96, 165, 250),
+        "delivering" => egui::Color32::from_rgb(167, 139, 250),
+        "delivered" => egui::Color32::from_rgb(52, 211, 153),
+        "refused" => egui::Color32::from_rgb(248, 113, 113),
+        _ => TEXT_MUTED,
+    }
+}
 
 fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default().with_inner_size([1180.0, 760.0]),
+        viewport: egui::ViewportBuilder::default().with_inner_size([1240.0, 820.0]),
         ..Default::default()
     };
     eframe::run_native("ShopTaBouffe", options, Box::new(|cc| {
-        // Thème sombre avec accent orange (cohérent avec Android).
         let mut style = (*cc.egui_ctx.style()).clone();
         style.visuals = egui::Visuals::dark();
-        style.visuals.widgets.noninteractive.bg_fill = egui::Color32::from_rgb(28, 28, 34);
-        style.visuals.widgets.inactive.bg_fill = egui::Color32::from_rgb(40, 40, 48);
+        style.visuals.widgets.noninteractive.bg_fill = SURFACE;
+        style.visuals.widgets.inactive.bg_fill = SURFACE2;
         style.visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(55, 55, 65);
-        style.visuals.widgets.active.bg_fill = egui::Color32::from_rgb(239, 108, 51);
-        style.visuals.selection.bg_fill = egui::Color32::from_rgb(239, 108, 51);
-        style.visuals.hyperlink_color = egui::Color32::from_rgb(239, 108, 51);
+        style.visuals.widgets.active.bg_fill = ORANGE;
+        style.visuals.selection.bg_fill = ORANGE;
+        style.visuals.hyperlink_color = ORANGE;
+        style.visuals.window_fill = egui::Color32::from_rgb(14, 14, 18);
         style.spacing.item_spacing = egui::vec2(8.0, 6.0);
-        style.spacing.button_padding = egui::vec2(10.0, 6.0);
+        style.spacing.button_padding = egui::vec2(12.0, 6.0);
         cc.egui_ctx.set_style(style);
         Ok(Box::new(ShopApp::default()))
     }))
