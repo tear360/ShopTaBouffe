@@ -9,6 +9,8 @@ import com.shoptabouffe.app.core.SocketManager
 import com.shoptabouffe.app.core.models.Conversation
 import com.shoptabouffe.app.core.models.Category
 import com.shoptabouffe.app.core.models.CategoryBody
+import com.shoptabouffe.app.core.models.CreateFormuleBody
+import com.shoptabouffe.app.core.models.CreateFormuleLine
 import com.shoptabouffe.app.core.models.CreateProductBody
 import com.shoptabouffe.app.core.models.Order
 import com.shoptabouffe.app.core.models.Product
@@ -26,6 +28,8 @@ data class AdminState(
     val tab: Int = 0,
     val orders: List<Order> = emptyList(),
     val products: List<Product> = emptyList(),
+    /** Produits simples (non-formule) disponibles comme ingrédients d'une formule. */
+    val formuleProducts: List<Product> = emptyList(),
     val conversations: List<Conversation> = emptyList(),
     val categories: List<Category> = emptyList(),
     val statusFilter: String = "all",
@@ -33,6 +37,9 @@ data class AdminState(
     val notice: String? = null,
     val editingProduct: Product? = null,
     val showProductDialog: Boolean = false,
+    val showCreateDialog: Boolean = false,
+    val showFormuleDialog: Boolean = false,
+    val editingFormule: Product? = null,
     val showCategoriesDialog: Boolean = false,
     val confirmDelete: Product? = null,
 ) {
@@ -101,7 +108,14 @@ class AdminViewModel(app: Application) : AndroidViewModel(app) {
     fun loadProducts() {
         viewModelScope.launch {
             when (val result = Api.call { Api.service.products(available = null) }) {
-                is ApiResult.Success -> _state.update { it.copy(products = result.data.products, error = null) }
+                is ApiResult.Success -> _state.update {
+                    it.copy(
+                        products = result.data.products,
+                        formuleProducts = result.data.products.filter { p -> !p.isFormule && p.available },
+                        error = null,
+                    )
+                }
+
                 is ApiResult.Failure -> _state.update { it.copy(error = it.error ?: result.message) }
             }
         }
@@ -171,12 +185,29 @@ class AdminViewModel(app: Application) : AndroidViewModel(app) {
 
     /* --------------------------------------------------------- produits */
 
+    fun openCreateDialog() = _state.update { it.copy(showCreateDialog = true) }
+
+    fun closeCreateDialog() = _state.update { it.copy(showCreateDialog = false) }
+
     fun openProductDialog(product: Product?) = _state.update {
         it.copy(showProductDialog = true, editingProduct = product)
     }
 
     fun closeProductDialog() = _state.update {
         it.copy(showProductDialog = false, editingProduct = null)
+    }
+
+    fun openFormuleDialog(formule: Product?) = _state.update {
+        it.copy(showFormuleDialog = true, editingFormule = formule)
+    }
+
+    fun closeFormuleDialog() = _state.update {
+        it.copy(showFormuleDialog = false, editingFormule = null)
+    }
+
+    /** Ouvre le bon formulaire selon le type de la fiche (produit ou formule). */
+    fun openEditor(item: Product) {
+        if (item.isFormule) openFormuleDialog(item) else openProductDialog(item)
     }
 
     fun askDelete(product: Product) = _state.update { it.copy(confirmDelete = product) }
@@ -212,13 +243,85 @@ class AdminViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** Le coût d'une formule est calculé serveur : on n'envoie que sa composition. */
+    fun saveFormule(body: CreateFormuleBody) {
+        val existing = _state.value.editingFormule
+        _state.update { it.copy(busy = true) }
+        viewModelScope.launch {
+            val result = if (existing == null) {
+                Api.call { Api.service.createFormule(body) }
+            } else {
+                Api.call { Api.service.updateFormule(existing.id, body) }
+            }
+            when (result) {
+                is ApiResult.Success -> {
+                    _state.update {
+                        it.copy(
+                            busy = false,
+                            showFormuleDialog = false,
+                            editingFormule = null,
+                            notice = if (existing == null) "Formule ajoutée." else "Formule modifiée.",
+                        )
+                    }
+                    loadProducts()
+                }
+
+                is ApiResult.Failure -> _state.update {
+                    it.copy(busy = false, notice = result.message)
+                }
+            }
+        }
+    }
+
+    /** Bascule de disponibilité : PATCH /products ou /formules selon le type. */
+    fun setAvailability(product: Product, available: Boolean) {
+        if (product.isFormule) {
+            saveFormule(formuleBody(product, available))
+        } else {
+            saveProduct(
+                CreateProductBody(
+                    name = product.name,
+                    description = product.description,
+                    priceCents = product.priceCents,
+                    costCents = product.costCents,
+                    category = product.category,
+                    imageUrl = product.imageUrl,
+                    available = available,
+                ),
+            )
+        }
+    }
+
+    private fun formuleBody(product: Product, available: Boolean = product.available) =
+        CreateFormuleBody(
+            name = product.name,
+            description = product.description,
+            priceCents = product.priceCents,
+            category = product.category,
+            imageUrl = product.imageUrl,
+            available = available,
+            items = product.items.map { CreateFormuleLine(it.productId, it.qty) },
+        )
+
     fun deleteProduct(product: Product) {
         _state.update { it.copy(busy = true, confirmDelete = null) }
         viewModelScope.launch {
-            when (val result = Api.call { Api.service.deleteProduct(product.id) }) {
+            val result = if (product.isFormule) {
+                Api.call { Api.service.deleteFormule(product.id) }
+            } else {
+                Api.call { Api.service.deleteProduct(product.id) }
+            }
+            when (result) {
                 is ApiResult.Success -> {
                     _state.update {
-                        it.copy(busy = false, notice = "« ${product.name} » supprimé.")
+                        it.copy(
+                            busy = false,
+                            notice = if (product.isFormule) {
+                                "Formule « ${product.name} » supprimée."
+                            } else {
+                                "« ${product.name} » supprimé."
+                            },
+                        )
                     }
                     loadProducts()
                 }

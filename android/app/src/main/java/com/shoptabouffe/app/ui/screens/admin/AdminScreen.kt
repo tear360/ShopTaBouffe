@@ -32,12 +32,12 @@ import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Inventory2
 import androidx.compose.material.icons.outlined.MarkChatRead
-import androidx.compose.material.icons.outlined.Sell
 import androidx.compose.material.icons.outlined.ShoppingBag
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -59,6 +59,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -78,6 +79,8 @@ import com.shoptabouffe.app.core.ApiResult
 import com.shoptabouffe.app.core.Config
 import com.shoptabouffe.app.core.models.Category
 import com.shoptabouffe.app.core.models.Conversation
+import com.shoptabouffe.app.core.models.CreateFormuleBody
+import com.shoptabouffe.app.core.models.CreateFormuleLine
 import com.shoptabouffe.app.core.models.CreateProductBody
 import com.shoptabouffe.app.core.models.Order
 import com.shoptabouffe.app.core.models.Product
@@ -171,6 +174,24 @@ fun AdminScreen(onOpenChat: (Long) -> Unit) {
                 .padding(16.dp),
         )
 
+        if (state.showCreateDialog) {
+            CreateChoiceDialog(
+                onProduct = {
+                    vm.closeCreateDialog()
+                    vm.openProductDialog(null)
+                },
+                onFormule = {
+                    vm.closeCreateDialog()
+                    vm.openFormuleDialog(null)
+                },
+                onCategory = {
+                    vm.closeCreateDialog()
+                    vm.openCategoriesDialog()
+                },
+                onDismiss = vm::closeCreateDialog,
+            )
+        }
+
         if (state.showProductDialog) {
             ProductDialog(
                 product = state.editingProduct,
@@ -178,6 +199,17 @@ fun AdminScreen(onOpenChat: (Long) -> Unit) {
                 saving = state.busy,
                 onCancel = vm::closeProductDialog,
                 onSave = { body -> vm.saveProduct(body) },
+            )
+        }
+
+        if (state.showFormuleDialog) {
+            FormuleDialog(
+                formule = state.editingFormule,
+                products = state.formuleProducts,
+                categories = state.categories.map { it.name },
+                saving = state.busy,
+                onCancel = vm::closeFormuleDialog,
+                onSave = { body -> vm.saveFormule(body) },
             )
         }
 
@@ -195,8 +227,21 @@ fun AdminScreen(onOpenChat: (Long) -> Unit) {
         state.confirmDelete?.let { product ->
             AlertDialog(
                 onDismissRequest = vm::cancelDelete,
-                title = { Text("Supprimer ce produit ?") },
-                text = { Text("« ${product.name} » disparaîtra de la boutique. Les commandes déjà passées le conservent.") },
+                title = {
+                    Text(
+                        if (product.isFormule) "Supprimer cette formule ?"
+                        else "Supprimer ce produit ?",
+                    )
+                },
+                text = {
+                    Text(
+                        if (product.isFormule) {
+                            "« ${product.name} » disparaîtra de la boutique. Les commandes déjà passées conservent la formule."
+                        } else {
+                            "« ${product.name} » disparaîtra de la boutique. Les commandes déjà passées le conservent."
+                        },
+                    )
+                },
                 confirmButton = {
                     TextButton(
                         onClick = { vm.deleteProduct(product) },
@@ -330,7 +375,7 @@ private fun AdminOrderCard(
             if (!order.note.isNullOrBlank()) {
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    "📝 ${order.note}",
+                    "Note : ${order.note}",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 2,
@@ -420,41 +465,19 @@ private fun ProductsTab(state: AdminState, vm: AdminViewModel) {
                 items(state.products, key = { it.id }) { product ->
                     ProductRow(
                         product = product,
-                        onEdit = { vm.openProductDialog(product) },
+                        onEdit = { vm.openEditor(product) },
                         onDelete = { vm.askDelete(product) },
                         onToggleAvailability = { available ->
-                            vm.saveProduct(
-                                CreateProductBody(
-                                    name = product.name,
-                                    description = product.description,
-                                    priceCents = product.priceCents,
-                                    costCents = product.costCents,
-                                    category = product.category,
-                                    imageUrl = product.imageUrl,
-                                    available = available,
-                                )
-                            )
+                            vm.setAvailability(product, available)
                         },
                     )
                 }
             }
         }
 
-        // Gestion des catégories (ajout / rename en cascade / suppression protégée).
+        // Un seul point d'entrée : produit, formule ou catégorie.
         OutlinedButton(
-            onClick = vm::openCategoriesDialog,
-            shape = RoundedCornerShape(50),
-            modifier = Modifier
-                .align(Alignment.BottomStart)
-                .padding(16.dp),
-        ) {
-            Icon(Icons.Outlined.Sell, contentDescription = null, modifier = Modifier.size(18.dp))
-            Spacer(Modifier.width(6.dp))
-            Text("Catégories")
-        }
-
-        OutlinedButton(
-            onClick = { vm.openProductDialog(null) },
+            onClick = vm::openCreateDialog,
             shape = RoundedCornerShape(50),
             modifier = Modifier
                 .align(Alignment.BottomEnd)
@@ -462,7 +485,7 @@ private fun ProductsTab(state: AdminState, vm: AdminViewModel) {
         ) {
             Icon(Icons.Outlined.Add, contentDescription = null, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(6.dp))
-            Text("Produit")
+            Text("Créer")
         }
     }
 }
@@ -499,10 +522,20 @@ private fun ProductRow(
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    "${product.category} · ${product.priceCents.toPrice()}",
+                    "${if (product.isFormule) "Formule · " else ""}" +
+                        "${product.category} · ${product.priceCents.toPrice()}",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                if (product.isFormule && product.items.isNotEmpty()) {
+                    Text(
+                        product.items.joinToString(", ") { "${it.qty}× ${it.name ?: it.productId}" },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
                 if (!product.available) {
                     Text(
                         "Indisponible",
@@ -746,6 +779,233 @@ private fun CategoriesDialog(
             },
         )
     }
+}
+
+/* ======================================================== choix de création */
+
+@Composable
+private fun CreateChoiceDialog(
+    onProduct: () -> Unit,
+    onFormule: () -> Unit,
+    onCategory: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Créer") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                TextButton(onClick = onProduct, modifier = Modifier.fillMaxWidth()) {
+                    Text("Produit", modifier = Modifier.fillMaxWidth())
+                }
+                TextButton(onClick = onFormule, modifier = Modifier.fillMaxWidth()) {
+                    Text("Formule", modifier = Modifier.fillMaxWidth())
+                }
+                TextButton(onClick = onCategory, modifier = Modifier.fillMaxWidth()) {
+                    Text("Catégorie", modifier = Modifier.fillMaxWidth())
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Annuler") }
+        },
+    )
+}
+
+/* ================================================================ formules */
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun FormuleDialog(
+    formule: Product?,
+    products: List<Product>,
+    categories: List<String>,
+    saving: Boolean,
+    onCancel: () -> Unit,
+    onSave: (CreateFormuleBody) -> Unit,
+) {
+    val formuleKey = formule?.id ?: 0L
+    var name by remember(formuleKey) { mutableStateOf(formule?.name.orEmpty()) }
+    var description by remember(formuleKey) { mutableStateOf(formule?.description.orEmpty()) }
+    var category by remember(formuleKey) { mutableStateOf(formule?.category.orEmpty()) }
+    var price by remember(formuleKey) {
+        mutableStateOf(formule?.priceCents?.toPriceInput().orEmpty())
+    }
+    var imageUrl by remember(formuleKey) { mutableStateOf(formule?.imageUrl.orEmpty()) }
+    var available by remember(formuleKey) { mutableStateOf(formule?.available ?: true) }
+    val selected = remember(formuleKey) {
+        mutableStateMapOf<Long, Int>().apply {
+            formule?.items?.forEach { item -> put(item.productId, item.qty) }
+        }
+    }
+
+    val catNames = remember(categories, formuleKey) {
+        val existing = formule?.category.orEmpty()
+        val base = categories.ifEmpty { Config.CATEGORIES }
+        (base + if (existing.isNotBlank() && existing !in base) listOf(existing) else emptyList())
+    }
+
+    val priceCents = price.eurosToCents()
+    val estimatedCost = products.sumOf { product ->
+        product.costCents * (selected[product.id] ?: 0)
+    }
+    val valid = name.isNotBlank() && category.isNotBlank() && priceCents != null &&
+        selected.isNotEmpty()
+
+    AlertDialog(
+        onDismissRequest = { if (!saving) onCancel() },
+        title = { Text(if (formule == null) "Nouvelle formule" else "Modifier la formule") },
+        text = {
+            Column(
+                modifier = Modifier
+                    .verticalScroll(rememberScrollState())
+                    .padding(top = 4.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it.take(120) },
+                    label = { Text("Nom *") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = description,
+                    onValueChange = { description = it.take(2000) },
+                    label = { Text("Description") },
+                    minLines = 2,
+                    maxLines = 4,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Text("Catégorie *", style = MaterialTheme.typography.labelLarge)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    catNames.forEach { cat ->
+                        FilterChip(
+                            selected = category == cat,
+                            onClick = { category = cat },
+                            label = { Text(cat) },
+                        )
+                    }
+                }
+                OutlinedTextField(
+                    value = price,
+                    onValueChange = { price = it.take(12) },
+                    label = { Text("Prix de vente (€) *") },
+                    isError = price.isNotBlank() && priceCents == null,
+                    supportingText = {
+                        Text(if (priceCents != null) "${priceCents.toPrice()}" else "Ex : 12,50")
+                    },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                PhotoField(
+                    imageUrl = imageUrl,
+                    enabled = !saving,
+                    onImageUrlChange = { imageUrl = it },
+                )
+                Text("Composition *", style = MaterialTheme.typography.labelLarge)
+                if (products.isEmpty()) {
+                    Text(
+                        "Ajoutez d'abord des produits simples : une formule ne peut pas contenir une autre formule.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                products.forEach { candidate ->
+                    val qty = selected[candidate.id]
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Checkbox(
+                            checked = qty != null,
+                            enabled = !saving,
+                            onCheckedChange = { checked ->
+                                if (checked) selected[candidate.id] = 1
+                                else selected.remove(candidate.id)
+                            },
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                candidate.name,
+                                style = MaterialTheme.typography.bodyMedium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Text(
+                                candidate.priceCents.toPrice(),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        if (qty != null) {
+                            TextButton(
+                                onClick = {
+                                    if (qty <= 1) selected.remove(candidate.id)
+                                    else selected[candidate.id] = qty - 1
+                                },
+                                enabled = !saving,
+                            ) { Text("-") }
+                            Text(qty.toString(), style = MaterialTheme.typography.titleSmall)
+                            TextButton(
+                                onClick = { if (qty < 99) selected[candidate.id] = qty + 1 },
+                                enabled = !saving && qty < 99,
+                            ) { Text("+") }
+                        }
+                    }
+                }
+                Text(
+                    "Coût indicatif : ${estimatedCost.toPrice()} · calculé par le serveur à l'enregistrement.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Disponible à la vente", style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            "Masquer pour une rupture de stock",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(checked = available, onCheckedChange = { available = it })
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    val cents = priceCents ?: return@TextButton
+                    onSave(
+                        CreateFormuleBody(
+                            name = name.trim(),
+                            description = description.trim().ifBlank { null },
+                            priceCents = cents,
+                            category = category.trim(),
+                            imageUrl = imageUrl.trim().ifBlank { null },
+                            available = available,
+                            items = selected.map { CreateFormuleLine(it.key, it.value) }
+                                .sortedBy { it.productId },
+                        ),
+                    )
+                },
+                enabled = valid && !saving,
+            ) { Text(if (saving) "Envoi…" else "Enregistrer") }
+        },
+        dismissButton = {
+            TextButton(onClick = onCancel, enabled = !saving) { Text("Annuler") }
+        },
+    )
 }
 
 /* ============================================================ formulaire === */

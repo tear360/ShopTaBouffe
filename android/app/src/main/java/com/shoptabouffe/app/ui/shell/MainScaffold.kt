@@ -160,6 +160,7 @@ fun MainScaffold(user: User, vm: MainViewModel) {
 
             composable(Routes.CART) {
                 CartScreen(
+                    initialPhone = user.phone.orEmpty(),
                     onOrderCreated = { orderId ->
                         nav.navigate(Routes.order(orderId)) {
                             popUpTo(Routes.CART) { inclusive = true }

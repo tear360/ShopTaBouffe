@@ -216,6 +216,11 @@ main {
   background: var(--surface-3); color: var(--muted); font-weight: 600;
 }
 .tag.off { background: rgba(255, 107, 107, .15); color: var(--red); }
+.tag.formule { background: rgba(167, 139, 250, .16); color: var(--purple, #a78bfa); }
+.create-choice { background: var(--surface-2); border: 1px solid var(--border); width: 100%; color: var(--text); }
+.create-choice:hover { border-color: var(--orange); background: var(--surface-3); }
+.create-choice .nm { display: flex; flex-direction: column; gap: 3px; font-size: 14px; }
+.create-choice .field-hint { font-size: 11.5px; }
 .qty-box { display: inline-flex; align-items: center; gap: 4px; }
 .qty-box button {
   width: 27px; height: 27px; border-radius: 8px; border: 1px solid var(--border);

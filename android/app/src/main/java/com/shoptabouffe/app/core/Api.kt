@@ -1,5 +1,8 @@
 package com.shoptabouffe.app.core
 
+import com.shoptabouffe.app.core.models.AccountInfo
+import com.shoptabouffe.app.core.models.AccountLinkBody
+import com.shoptabouffe.app.core.models.AccountPatch
 import com.shoptabouffe.app.core.models.AuthResponse
 import com.shoptabouffe.app.core.models.CategoriesResponse
 import com.shoptabouffe.app.core.models.Category
@@ -7,10 +10,14 @@ import com.shoptabouffe.app.core.models.CategoryBody
 import com.shoptabouffe.app.core.models.CodeBody
 import com.shoptabouffe.app.core.models.ConversationsResponse
 import com.shoptabouffe.app.core.models.CreateExpenseBody
+import com.shoptabouffe.app.core.models.CreateFormuleBody
 import com.shoptabouffe.app.core.models.CredentialsBody
 import com.shoptabouffe.app.core.models.CreateOrderBody
 import com.shoptabouffe.app.core.models.CreateProductBody
+import com.shoptabouffe.app.core.models.DeleteResponse
 import com.shoptabouffe.app.core.models.ErrorBody
+import com.shoptabouffe.app.core.models.FormulesResponse
+import com.shoptabouffe.app.core.models.LinkResponse
 import com.shoptabouffe.app.core.models.Expense
 import com.shoptabouffe.app.core.models.ExpensesResponse
 import com.shoptabouffe.app.core.models.FinanceProductsResponse
@@ -108,6 +115,42 @@ interface ShopTaBouffeApi {
 
     @DELETE("products/{id}")
     suspend fun deleteProduct(@Path("id") id: Long)
+
+    // --- formules (toujours des produits côté galerie) -------------------
+    @GET("formules")
+    suspend fun formules(
+        @Query("search") search: String? = null,
+        @Query("category") category: String? = null,
+        @Query("available") available: Int? = null,
+    ): FormulesResponse
+
+    @GET("formules/{id}")
+    suspend fun formule(@Path("id") id: Long): Product
+
+    @POST("formules")
+    suspend fun createFormule(@Body body: CreateFormuleBody): Product
+
+    @PATCH("formules/{id}")
+    suspend fun updateFormule(@Path("id") id: Long, @Body body: CreateFormuleBody): Product
+
+    @DELETE("formules/{id}")
+    suspend fun deleteFormule(@Path("id") id: Long)
+
+    // --- compte -----------------------------------------------------------
+    @GET("account")
+    suspend fun account(): AccountInfo
+
+    @PATCH("account")
+    suspend fun updateAccount(@Body body: AccountPatch): AccountInfo
+
+    @POST("account/link")
+    suspend fun linkAccount(@Body body: AccountLinkBody): LinkResponse
+
+    @DELETE("account/unlink/{provider}")
+    suspend fun unlinkAccount(@Path("provider") provider: String): AccountInfo
+
+    @DELETE("account")
+    suspend fun deleteAccount(): DeleteResponse
 
     // --- catégories -------------------------------------------------------
     @GET("categories")

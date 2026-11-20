@@ -9,6 +9,9 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.shoptabouffe.app.core.Api
 import com.shoptabouffe.app.core.ApiResult
+import com.shoptabouffe.app.core.models.AccountInfo
+import com.shoptabouffe.app.core.models.AccountLinkBody
+import com.shoptabouffe.app.core.models.AccountPatch
 import com.shoptabouffe.app.core.models.AuthResponse
 import com.shoptabouffe.app.core.Cart
 import com.shoptabouffe.app.core.Config
@@ -72,6 +75,19 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val _updateNotice = MutableStateFlow<String?>(null)
     val updateNotice: StateFlow<String?> = _updateNotice.asStateFlow()
 
+    /* ------------------------------------------------------------ compte */
+
+    /** Profil enrichi (email, téléphone, identités liées) chargé par l'écran Profil. */
+    private val _account = MutableStateFlow<AccountInfo?>(null)
+    val account: StateFlow<AccountInfo?> = _account.asStateFlow()
+
+    private val _accountBusy = MutableStateFlow(false)
+    val accountBusy: StateFlow<Boolean> = _accountBusy.asStateFlow()
+
+    /** Confirmations et erreurs des actions de gestion du compte. */
+    private val _accountNotice = MutableStateFlow<String?>(null)
+    val accountNotice: StateFlow<String?> = _accountNotice.asStateFlow()
+
     init {
         resolveSession()
         checkForUpdate()
@@ -118,7 +134,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun onAuthRedirect(uri: Uri) {
         val token = uri.getQueryParameter("token")
         val error = uri.getQueryParameter("error")
+        val linked = uri.getQueryParameter("linked")
         when {
+            // Retour d'une liaison de compte : pas de nouveau token, on recharge
+            // simplement le profil enrichi pour afficher la nouvelle identité.
+            !linked.isNullOrBlank() -> {
+                _accountNotice.value = "Compte ${Config.providerLabel(linked)} lié."
+                loadAccount()
+            }
+
             !token.isNullOrBlank() -> {
                 SocketManager.disconnect()
                 session.saveToken(token)
@@ -153,19 +177,21 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** Ouvre le parcours OAuth dans un Custom Tab (le retour se fait en deep link). */
     fun startOAuth(provider: String, context: Context) {
         _loginNotice.value = null
-        val url = Config.api("auth/start?provider=$provider")
+        if (!openInBrowser(context, Config.api("auth/start?provider=$provider"))) {
+            _loginNotice.value = "Impossible d'ouvrir le navigateur."
+        }
+    }
+
+    /** Ouvre une URL dans un Custom Tab, avec repli sur le navigateur système. */
+    private fun openInBrowser(context: Context, url: String): Boolean {
         val customTabs = CustomTabsIntent.Builder().setShowTitle(true).build()
         customTabs.intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        val opened = runCatching { customTabs.launchUrl(context, Uri.parse(url)) }.isSuccess
-        if (!opened) {
-            runCatching {
-                context.startActivity(
-                    Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                )
-            }.onFailure {
-                _loginNotice.value = "Impossible d'ouvrir le navigateur."
-            }
-        }
+        if (runCatching { customTabs.launchUrl(context, Uri.parse(url)) }.isSuccess) return true
+        return runCatching {
+            context.startActivity(
+                Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+        }.isSuccess
     }
 
     fun consumeLoginNotice() {
@@ -342,6 +368,104 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** Charge GET /api/account (téléphone, identités, mot de passe). */
+    fun loadAccount() {
+        _accountBusy.value = true
+        viewModelScope.launch {
+            when (val result = Api.call { Api.service.account() }) {
+                is ApiResult.Success -> {
+                    _account.value = result.data
+                    updateUser(result.data.toUser())
+                }
+
+                is ApiResult.Failure -> _accountNotice.value = result.message
+            }
+            _accountBusy.value = false
+        }
+    }
+
+    /** PATCH /api/account — une chaîne vide efface le champ côté serveur. */
+    fun patchAccount(email: String, phone: String) {
+        _accountBusy.value = true
+        viewModelScope.launch {
+            when (
+                val result = Api.call {
+                    Api.service.updateAccount(AccountPatch(email.trim(), phone.trim()))
+                }
+            ) {
+                is ApiResult.Success -> {
+                    _account.value = result.data
+                    updateUser(result.data.toUser())
+                    _accountNotice.value = "Compte mis à jour."
+                }
+
+                is ApiResult.Failure -> _accountNotice.value = result.message
+            }
+            _accountBusy.value = false
+        }
+    }
+
+    /** Lance le parcours OAuth de liaison, le retour se fait en deep link « linked ». */
+    fun linkAccount(provider: String, context: Context) {
+        _accountBusy.value = true
+        viewModelScope.launch {
+            when (val result = Api.call { Api.service.linkAccount(AccountLinkBody(provider, "app")) }) {
+                is ApiResult.Success -> {
+                    val url = result.data.url
+                    if (url.isNullOrBlank() || !openInBrowser(context, url)) {
+                        _accountNotice.value = "Impossible d'ouvrir le navigateur."
+                    }
+                }
+
+                is ApiResult.Failure -> _accountNotice.value = result.message
+            }
+            _accountBusy.value = false
+        }
+    }
+
+    /** Supprime une identité liée (le serveur refuse de laisser le compte sans accès). */
+    fun unlinkAccount(provider: String) {
+        _accountBusy.value = true
+        viewModelScope.launch {
+            when (val result = Api.call { Api.service.unlinkAccount(provider) }) {
+                is ApiResult.Success -> {
+                    _account.value = result.data
+                    updateUser(result.data.toUser())
+                    _accountNotice.value = "Compte ${Config.providerLabel(provider)} dissocié."
+                }
+
+                is ApiResult.Failure -> _accountNotice.value = result.message
+            }
+            _accountBusy.value = false
+        }
+    }
+
+    /** Suppression définitive : les données financières restent sur le serveur. */
+    fun deleteAccount() {
+        _accountBusy.value = true
+        viewModelScope.launch {
+            when (val result = Api.call { Api.service.deleteAccount() }) {
+                is ApiResult.Success -> {
+                    SocketManager.disconnect()
+                    session.logout()
+                    Cart.clear()
+                    _account.value = null
+                    _needsUpgrade.value = null
+                    _accountNotice.value = null
+                    _loginNotice.value = "Votre compte a été supprimé."
+                    _auth.value = AuthState.LoggedOut
+                }
+
+                is ApiResult.Failure -> _accountNotice.value = result.message
+            }
+            _accountBusy.value = false
+        }
+    }
+
+    fun consumeAccountNotice() {
+        _accountNotice.value = null
+    }
+
     fun logout() {
         // Un ancien compte invité ne doit pas pouvoir se déconnecter avant
         // d'avoir choisi ses identifiants : il ne pourrait plus se reconnecter.
@@ -352,6 +476,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         SocketManager.disconnect()
         session.logout()
         Cart.clear()
+        _account.value = null
         _needsUpgrade.value = null
         _loginNotice.value = null
         _auth.value = AuthState.LoggedOut

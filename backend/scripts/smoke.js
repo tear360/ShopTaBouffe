@@ -88,15 +88,19 @@ async function runAll() {
     assert(r.json.version === '1.0.0', 'version != 1.0.0');
   });
 
-  await step('POST /api/auth/demo + compte vérifié (chat autorisé)', async () => {
+  await step('POST /api/auth/register + comptes vérifiés (chat autorisé)', async () => {
     // suffixe unique : le rôle (supplier) persiste en base, on repart d'utilisateurs neufs
     const stamp = Date.now().toString(36);
-    const a = await api('POST', '/api/auth/demo', { body: { name: `Smoke Supplier ${stamp}` } });
-    assert(a.status === 200, `status ${a.status}`);
+    const a = await api('POST', '/api/auth/register', {
+      body: { name: `Smoke Supplier ${stamp}`, username: `smokesup_${stamp}`, password: 'password123' },
+    });
+    assert(a.status === 201, `status ${a.status}`);
     assert(a.json.token, 'token manquant');
     assert(a.json.user && a.json.user.role === 'customer', 'role != customer');
-    const b = await api('POST', '/api/auth/demo', { body: { name: `Smoke Client ${stamp}` } });
-    assert(b.status === 200 && b.json.token, 'demo client KO');
+    const b = await api('POST', '/api/auth/register', {
+      body: { name: `Smoke Client ${stamp}`, username: `smokecli_${stamp}`, password: 'password123' },
+    });
+    assert(b.status === 201 && b.json.token, 'register client KO');
     state.tokenA = a.json.token;
     state.userA = a.json.user;
     state.tokenB = b.json.token;
@@ -109,7 +113,11 @@ async function runAll() {
           "VALUES ('github', ?, ?, NULL, NULL, 'customer', ?)"
       )
       .run(`smoke-${stamp}`, `Smoke Client GH ${stamp}`, new Date().toISOString());
-    const gh = db.prepare('SELECT * FROM users WHERE id = ?').get(info.lastInsertRowid);
+    const ghId = Number(info.lastInsertRowid);
+    db.prepare(
+      "INSERT INTO user_identities (user_id, provider, provider_id, created_at) VALUES (?, 'github', ?, ?)"
+    ).run(ghId, `smoke-${stamp}`, new Date().toISOString());
+    const gh = db.prepare('SELECT * FROM users WHERE id = ?').get(ghId);
     state.tokenGH = signToken(gh);
     state.userGH = gh;
   });

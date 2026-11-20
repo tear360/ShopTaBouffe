@@ -29,6 +29,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -57,7 +58,7 @@ import com.shoptabouffe.app.ui.components.QuantitySelector
 import kotlinx.coroutines.launch
 
 @Composable
-fun CartScreen(onOrderCreated: (Long) -> Unit) {
+fun CartScreen(onOrderCreated: (Long) -> Unit, initialPhone: String = "") {
     val lines by Cart.lines.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -67,6 +68,11 @@ fun CartScreen(onOrderCreated: (Long) -> Unit) {
     var note by rememberSaveable { mutableStateOf("") }
     var sending by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+
+    // Le numéro du compte sert de valeur par défaut, sans écraser une saisie.
+    LaunchedEffect(initialPhone) {
+        if (phone.isBlank()) phone = initialPhone
+    }
 
     val totalCents = lines.sumOf { it.lineTotalCents }
     val addressValid = address.trim().length >= 3

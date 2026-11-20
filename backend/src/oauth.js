@@ -19,20 +19,27 @@ setInterval(() => {
   }
 }, 60 * 1000).unref();
 
-export function createState(provider) {
+export function createState(provider, extra = {}) {
   const state = crypto.randomBytes(16).toString('hex'); // 32 hex
-  oauthStates.set(state, { provider, expires: Date.now() + STATES_TTL_MS });
+  oauthStates.set(state, {
+    provider,
+    expires: Date.now() + STATES_TTL_MS,
+    ...extra,
+  });
   return state;
 }
 
-/** Vérifie (cookie + mémoire, provider correspond) puis consomme (usage unique). */
+/**
+ * Vérifie (cookie + mémoire, provider correspond) puis consomme (usage unique).
+ * Retourne l'entrée (qui peut porter `link: true`) ou null.
+ */
 export function consumeState(state, provider) {
   const entry = oauthStates.get(state);
-  if (!entry) return false;
+  if (!entry) return null;
   oauthStates.delete(state);
-  if (entry.expires <= Date.now()) return false;
-  if (entry.provider !== provider) return false;
-  return true;
+  if (entry.expires <= Date.now()) return null;
+  if (entry.provider !== provider) return null;
+  return entry;
 }
 
 function authorizeUrl(baseUrl, params) {

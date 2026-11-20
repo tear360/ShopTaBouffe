@@ -7,12 +7,55 @@ data class User(
     val provider: String? = null,
     val name: String = "",
     val email: String? = null,
+    val phone: String? = null,
     @SerializedName("avatarUrl") val avatarUrl: String? = null,
     val role: String = "customer",
     val createdAt: String? = null,
 ) {
     val isSupplier: Boolean get() = role == "supplier"
 }
+
+/** GET /api/account : profil enrichi (téléphone, mot de passe, identités liées). */
+data class AccountInfo(
+    val id: Long = 0,
+    val provider: String? = null,
+    val name: String = "",
+    val email: String? = null,
+    val phone: String? = null,
+    @SerializedName("avatarUrl") val avatarUrl: String? = null,
+    val role: String = "customer",
+    val createdAt: String? = null,
+    val hasPassword: Boolean = false,
+    val identities: List<Identity> = emptyList(),
+) {
+    fun toUser(): User = User(
+        id = id,
+        provider = provider,
+        name = name,
+        email = email,
+        phone = phone,
+        avatarUrl = avatarUrl,
+        role = role,
+        createdAt = createdAt,
+    )
+}
+
+data class Identity(
+    val provider: String = "",
+    val providerId: String? = null,
+    val email: String? = null,
+    @SerializedName("avatarUrl") val avatarUrl: String? = null,
+    val createdAt: String? = null,
+)
+
+/** PATCH /api/account : "" permet d'effacer un champ (le serveur le convertit en null). */
+data class AccountPatch(val email: String? = null, val phone: String? = null)
+
+data class AccountLinkBody(val provider: String, val target: String = "app")
+
+data class LinkResponse(val url: String? = null)
+
+data class DeleteResponse(val ok: Boolean = false)
 
 data class AuthResponse(
     val token: String? = null,
@@ -29,7 +72,34 @@ data class Product(
     @SerializedName("imageUrl") val imageUrl: String? = null,
     val available: Boolean = true,
     val createdAt: String? = null,
+    val kind: String = "product",
+    val items: List<FormuleItem> = emptyList(),
+) {
+    val isFormule: Boolean get() = kind == "formule"
+}
+
+/** Composition d'une formule : le nom est fourni par GET /products et /formules. */
+data class FormuleItem(
+    val productId: Long = 0,
+    val qty: Int = 1,
+    val name: String? = null,
 )
+
+/** Ligne envoyée au serveur : seul le couple productId/qty est utile. */
+data class CreateFormuleLine(val productId: Long, val qty: Int)
+
+/** Corps complet utilisé pour POST et PATCH /api/formules. */
+data class CreateFormuleBody(
+    val name: String,
+    val description: String?,
+    val priceCents: Int,
+    val category: String,
+    @SerializedName("imageUrl") val imageUrl: String?,
+    val available: Boolean,
+    val items: List<CreateFormuleLine>,
+)
+
+data class FormulesResponse(val formules: List<Product> = emptyList())
 
 data class OrderItem(
     val productId: Long = 0,

@@ -54,6 +54,17 @@ export function requireAuth(req, res, next) {
   next();
 }
 
+/** Retrouve l'utilisateur depuis un JWT (utilisé par le cookie de liaison OAuth). */
+export function userFromToken(token) {
+  if (typeof token !== 'string' || !token) return null;
+  try {
+    const payload = jwt.verify(token, getJwtSecret(), { algorithms: ['HS256'] });
+    return db.prepare('SELECT * FROM users WHERE id = ?').get(payload.sub) || null;
+  } catch {
+    return null;
+  }
+}
+
 /** Middleware : exige le rôle supplier (à poser après requireAuth). */
 export function requireSupplier(req, res, next) {
   if (!req.user || req.user.role !== 'supplier') {

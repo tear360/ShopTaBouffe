@@ -12,7 +12,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 const API_BASE: &str = "https://chorizo.dpdns.org/api";
-const APP_VERSION: &str = "1.0.10";
+const APP_VERSION: &str = "1.0.11";
 
 /* ------------------------------------------------------- palette (Theme.kt) */
 
@@ -48,6 +48,10 @@ struct User {
     avatar_url: Option<String>,
     #[serde(default)]
     provider: Option<String>,
+    #[serde(default)]
+    email: Option<String>,
+    #[serde(default)]
+    phone: Option<String>,
 }
 
 impl User {
@@ -73,6 +77,63 @@ struct Product {
     #[serde(rename = "imageUrl", default)]
     image_url: Option<String>,
     available: bool,
+    /// "product" (valeur par défaut pour les anciennes réponses) ou "formule".
+    #[serde(default)]
+    kind: String,
+    /// Renseigné par le serveur pour les formules : [{productId, qty, name}].
+    #[serde(default)]
+    items: Vec<FormuleItem>,
+}
+
+impl Product {
+    fn is_formule(&self) -> bool {
+        self.kind == "formule" || !self.items.is_empty()
+    }
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+struct FormuleItem {
+    #[serde(rename = "productId")]
+    product_id: i64,
+    qty: i64,
+    /// Présent dans les réponses GET, inutile pour les envois POST/PATCH.
+    #[serde(default)]
+    name: String,
+}
+
+/// Profil complet renvoyé par GET/PATCH /api/account.
+#[derive(Clone, Debug, Default, Deserialize)]
+struct Account {
+    id: i64,
+    name: String,
+    #[serde(default)]
+    email: Option<String>,
+    #[serde(default)]
+    phone: Option<String>,
+    #[serde(rename = "avatarUrl", default)]
+    avatar_url: Option<String>,
+    #[serde(default)]
+    provider: Option<String>,
+    role: String,
+    #[serde(rename = "hasPassword", default)]
+    has_password: bool,
+    #[serde(default)]
+    identities: Vec<Identity>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+struct Identity {
+    provider: String,
+    #[serde(default)]
+    email: Option<String>,
+    #[serde(rename = "createdAt", default)]
+    created_at: Option<String>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum ImageTarget {
+    Product,
+    Formule,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -200,6 +261,8 @@ enum Msg {
     UpgradeErr(String),
     RoleUpdated(User),
     Products(Vec<Product>),
+    Account(Account),
+    AccountDeleted,
     Orders(Vec<Order>),
     Summary(FinanceSummary),
     Expenses(Vec<Expense>),
@@ -208,7 +271,7 @@ enum Msg {
     Messages(i64, Vec<ChatMessage>),
     MessageSent,
     OrderPlaced,
-    ImageUploaded(String),
+    ImageUploaded(String, ImageTarget),
     ImageLoaded(String, egui::ColorImage),
     UpdateAvailable(String, String),
     Unauthorized,
@@ -239,6 +302,14 @@ struct ShopApp {
     notice: Option<String>,
     notice_at: Option<Instant>,
 
+    // Compte : profil distant, identités liées et champs modifiables.
+    account: Option<Account>,
+    account_email: String,
+    account_phone: String,
+    account_confirm_delete: bool,
+    // Modale « Gérer le compte » (contenu de la section Mon compte).
+    account_modal: bool,
+
     products: Vec<Product>,
     search: String,
     category: Option<String>,
@@ -247,6 +318,12 @@ struct ShopApp {
     expanded_order: Option<i64>,
 
     admin_tab: usize, // 0 produits, 1 catégories
+    // Création unifiée : mini-dialogue « Produit / Formule / Catégorie ».
+    create_menu: bool,
+    product_form_open: bool,
+    category_form_open: bool,
+    formule_form_open: bool,
+    formule_editing_id: Option<i64>,
 
     summary: Option<FinanceSummary>,
     expenses: Vec<Expense>,
@@ -273,6 +350,16 @@ struct ShopApp {
     new_prod_image: String,
     image_path: String,
     editing_id: Option<i64>,
+
+    // Formulaire de formule (composition = produits existants + quantités).
+    new_form_name: String,
+    new_form_price: String,
+    new_form_category: String,
+    new_form_desc: String,
+    new_form_available: bool,
+    new_form_image: String,
+    form_image_path: String,
+    new_form_items: Vec<FormuleItem>,
 
     order_address: String,
     order_phone: String,
@@ -380,6 +467,11 @@ impl Default for ShopApp {
             up_password: String::new(),
             notice: None,
             notice_at: None,
+            account: None,
+            account_email: String::new(),
+            account_phone: String::new(),
+            account_confirm_delete: false,
+            account_modal: false,
             products: vec![],
             search: String::new(),
             category: None,
@@ -387,6 +479,11 @@ impl Default for ShopApp {
             orders: vec![],
             expanded_order: None,
             admin_tab: 0,
+            create_menu: false,
+            product_form_open: false,
+            category_form_open: false,
+            formule_form_open: false,
+            formule_editing_id: None,
             summary: None,
             expenses: vec![],
             catégories: vec![],
@@ -409,6 +506,14 @@ impl Default for ShopApp {
             new_prod_image: String::new(),
             image_path: String::new(),
             editing_id: None,
+            new_form_name: String::new(),
+            new_form_price: String::new(),
+            new_form_category: String::new(),
+            new_form_desc: String::new(),
+            new_form_available: true,
+            new_form_image: String::new(),
+            form_image_path: String::new(),
+            new_form_items: vec![],
             order_address: String::new(),
             order_phone: String::new(),
             order_note: String::new(),
@@ -506,6 +611,107 @@ fn fetch_products(tx: Sender<Msg>, token: Option<String>) {
     });
 }
 
+/// GET /api/account — profil, mot de passe et identités liées.
+fn fetch_account(tx: Sender<Msg>, token: String) {
+    thread::spawn(move || {
+        match http_call(
+            reqwest::Method::GET,
+            format!("{}/account", API_BASE),
+            Some(token),
+            None,
+            None,
+        ) {
+            Ok(t) => parse_ok(&tx, t, |a: Account| {
+                let _ = tx.send(Msg::Account(a));
+            }),
+            Err(e) => forward_err(&tx, e),
+        }
+    });
+}
+
+/// PATCH /api/account — email et/ou téléphone (chaîne vide = effacement).
+fn update_account(tx: Sender<Msg>, token: String, email: String, phone: String) {
+    thread::spawn(move || {
+        match http_call(
+            reqwest::Method::PATCH,
+            format!("{}/account", API_BASE),
+            Some(token),
+            Some(serde_json::json!({ "email": email, "phone": phone })),
+            None,
+        ) {
+            Ok(t) => parse_ok(&tx, t, |a: Account| {
+                let _ = tx.send(Msg::Notice("Compte mis à jour".into()));
+                let _ = tx.send(Msg::Account(a));
+            }),
+            Err(e) => forward_err(&tx, e),
+        }
+    });
+}
+
+/// POST /api/account/link — ouvre l'OAuth dans le navigateur (target=web).
+fn link_account(tx: Sender<Msg>, token: String, provider: &str) {
+    let provider = provider.to_string();
+    thread::spawn(move || {
+        #[derive(Deserialize)]
+        struct R {
+            url: String,
+        }
+        match http_call(
+            reqwest::Method::POST,
+            format!("{}/account/link", API_BASE),
+            Some(token),
+            Some(serde_json::json!({ "provider": provider, "target": "web" })),
+            None,
+        ) {
+            Ok(t) => parse_ok(&tx, t, |v: R| {
+                let _ = open::that(&v.url);
+                let _ = tx.send(Msg::Notice(
+                    "Liaison ouverte dans le navigateur. Rafraîchissez le compte une fois terminée."
+                        .into(),
+                ));
+            }),
+            Err(e) => forward_err(&tx, e),
+        }
+    });
+}
+
+/// DELETE /api/account/unlink/{provider} — dissocie GitHub, Google ou local.
+fn unlink_account(tx: Sender<Msg>, token: String, provider: String) {
+    thread::spawn(move || {
+        match http_call(
+            reqwest::Method::DELETE,
+            format!("{}/account/unlink/{}", API_BASE, provider),
+            Some(token),
+            None,
+            None,
+        ) {
+            Ok(t) => parse_ok(&tx, t, |a: Account| {
+                let _ = tx.send(Msg::Notice("Identité dissociée".into()));
+                let _ = tx.send(Msg::Account(a));
+            }),
+            Err(e) => forward_err(&tx, e),
+        }
+    });
+}
+
+/// DELETE /api/account — les finances sont conservées côté serveur.
+fn delete_account(tx: Sender<Msg>, token: String) {
+    thread::spawn(move || {
+        match http_call(
+            reqwest::Method::DELETE,
+            format!("{}/account", API_BASE),
+            Some(token),
+            None,
+            None,
+        ) {
+            Ok(_) => {
+                let _ = tx.send(Msg::AccountDeleted);
+            }
+            Err(e) => forward_err(&tx, e),
+        }
+    });
+}
+
 /// supplier → GET /orders (toutes) ; client → GET /orders/mine (les siennes).
 fn fetch_orders(tx: Sender<Msg>, token: String, supplier: bool) {
     thread::spawn(move || {
@@ -572,17 +778,17 @@ fn fetch_catégories(tx: Sender<Msg>, token: Option<String>) {
         #[derive(Deserialize)]
         struct R {
             #[serde(default)]
-            catégories: Vec<Category>,
+            categories: Vec<Category>,
         }
         match http_call(
             reqwest::Method::GET,
-            format!("{}/catégories", API_BASE),
+            format!("{}/categories", API_BASE),
             token,
             None,
             None,
         ) {
             Ok(t) => parse_ok(&tx, t, |v: R| {
-                let _ = tx.send(Msg::Catégories(v.catégories));
+                let _ = tx.send(Msg::Catégories(v.categories));
             }),
             Err(e) => forward_err(&tx, e),
         }
@@ -839,7 +1045,7 @@ fn create_category(tx: Sender<Msg>, token: String, name: String) {
     thread::spawn(move || {
         match http_call(
             reqwest::Method::POST,
-            format!("{}/catégories", API_BASE),
+            format!("{}/categories", API_BASE),
             Some(token.clone()),
             Some(serde_json::json!({ "name": name })),
             None,
@@ -857,7 +1063,7 @@ fn rename_category(tx: Sender<Msg>, token: String, id: i64, name: String) {
     thread::spawn(move || {
         match http_call(
             reqwest::Method::PATCH,
-            format!("{}/catégories/{}", API_BASE, id),
+            format!("{}/categories/{}", API_BASE, id),
             Some(token.clone()),
             Some(serde_json::json!({ "name": name })),
             None,
@@ -875,7 +1081,7 @@ fn delete_category(tx: Sender<Msg>, token: String, id: i64) {
     thread::spawn(move || {
         match http_call(
             reqwest::Method::DELETE,
-            format!("{}/catégories/{}", API_BASE, id),
+            format!("{}/categories/{}", API_BASE, id),
             Some(token.clone()),
             None,
             None,
@@ -1026,8 +1232,128 @@ fn delete_product(tx: Sender<Msg>, token: String, id: i64) {
     });
 }
 
+/// Corps commun aux formules. Le coût est calculé par le serveur.
+fn formule_body(
+    name: String,
+    desc: Option<String>,
+    price_cents: i64,
+    category: String,
+    image_url: Option<String>,
+    available: bool,
+    items: Vec<FormuleItem>,
+) -> serde_json::Value {
+    let items: Vec<serde_json::Value> = items
+        .into_iter()
+        .map(|i| serde_json::json!({ "productId": i.product_id, "qty": i.qty }))
+        .collect();
+    serde_json::json!({
+        "name": name,
+        "description": desc,
+        "priceCents": price_cents,
+        "category": category,
+        "imageUrl": image_url,
+        "available": available,
+        "items": items,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn create_formule(
+    tx: Sender<Msg>,
+    token: String,
+    name: String,
+    desc: Option<String>,
+    price_cents: i64,
+    category: String,
+    image_url: Option<String>,
+    available: bool,
+    items: Vec<FormuleItem>,
+) {
+    thread::spawn(move || {
+        let body = formule_body(
+            name,
+            desc,
+            price_cents,
+            category,
+            image_url,
+            available,
+            items,
+        );
+        match http_call(
+            reqwest::Method::POST,
+            format!("{}/formules", API_BASE),
+            Some(token.clone()),
+            Some(body),
+            None,
+        ) {
+            Ok(_) => {
+                let _ = tx.send(Msg::Notice("Formule ajoutée".into()));
+                fetch_products(tx.clone(), Some(token));
+            }
+            Err(e) => forward_err(&tx, e),
+        }
+    });
+}
+
+#[allow(clippy::too_many_arguments)]
+fn update_formule(
+    tx: Sender<Msg>,
+    token: String,
+    id: i64,
+    name: String,
+    desc: Option<String>,
+    price_cents: i64,
+    category: String,
+    image_url: Option<String>,
+    available: bool,
+    items: Vec<FormuleItem>,
+) {
+    thread::spawn(move || {
+        let body = formule_body(
+            name,
+            desc,
+            price_cents,
+            category,
+            image_url,
+            available,
+            items,
+        );
+        match http_call(
+            reqwest::Method::PATCH,
+            format!("{}/formules/{}", API_BASE, id),
+            Some(token.clone()),
+            Some(body),
+            None,
+        ) {
+            Ok(_) => {
+                let _ = tx.send(Msg::Notice("Formule modifiée".into()));
+                fetch_products(tx.clone(), Some(token));
+            }
+            Err(e) => forward_err(&tx, e),
+        }
+    });
+}
+
+fn delete_formule(tx: Sender<Msg>, token: String, id: i64) {
+    thread::spawn(move || {
+        match http_call(
+            reqwest::Method::DELETE,
+            format!("{}/formules/{}", API_BASE, id),
+            Some(token.clone()),
+            None,
+            None,
+        ) {
+            Ok(_) => {
+                let _ = tx.send(Msg::Notice("Formule supprimée".into()));
+                fetch_products(tx.clone(), Some(token));
+            }
+            Err(e) => forward_err(&tx, e),
+        }
+    });
+}
+
 /// POST /uploads/product-image (multipart, champ « image ») → { url }
-fn upload_image(tx: Sender<Msg>, token: String, path: String) {
+fn upload_image(tx: Sender<Msg>, token: String, path: String, target: ImageTarget) {
     thread::spawn(move || {
         if !std::path::Path::new(&path).is_file() {
             let _ = tx.send(Msg::Error("Fichier introuvable.".into()));
@@ -1052,7 +1378,7 @@ fn upload_image(tx: Sender<Msg>, token: String, path: String) {
             Some(form),
         ) {
             Ok(t) => parse_ok(&tx, t, |v: R| {
-                let _ = tx.send(Msg::ImageUploaded(v.url));
+                let _ = tx.send(Msg::ImageUploaded(v.url, target));
             }),
             Err(e) => forward_err(&tx, e),
         }
@@ -1495,7 +1821,18 @@ impl ShopApp {
         self.expenses.clear();
         self.summary = None;
         self.cart.clear();
+        self.account = None;
+        self.account_email.clear();
+        self.account_phone.clear();
+        self.account_confirm_delete = false;
+        self.account_modal = false;
+        self.order_phone.clear();
         self.admin_tab = 0;
+        self.create_menu = false;
+        self.product_form_open = false;
+        self.category_form_open = false;
+        self.formule_form_open = false;
+        self.formule_editing_id = None;
         self.expanded_order = None;
         self.login_tab = 0;
         self.login_username.clear();
@@ -1519,6 +1856,11 @@ impl ShopApp {
                 fetch_catégories(self.tx.clone(), self.token.clone());
             }
             Screen::Orders => self.reload_orders(),
+            Screen::Profile => {
+                if let Some(t) = self.token.clone() {
+                    fetch_account(self.tx.clone(), t);
+                }
+            }
             Screen::Chat => {
                 if let Some(t) = self.token.clone() {
                     fetch_conversations(self.tx.clone(), t);
@@ -1548,6 +1890,18 @@ impl ShopApp {
         self.new_prod_available = true;
         self.new_prod_image.clear();
         self.image_path.clear();
+    }
+
+    fn reset_formule_form(&mut self) {
+        self.formule_editing_id = None;
+        self.new_form_name.clear();
+        self.new_form_price.clear();
+        self.new_form_category.clear();
+        self.new_form_desc.clear();
+        self.new_form_available = true;
+        self.new_form_image.clear();
+        self.form_image_path.clear();
+        self.new_form_items.clear();
     }
 
     /// Vignette produit (cache d'images téléchargées en arrière-plan).
@@ -1867,6 +2221,38 @@ impl ShopApp {
                                     .color(MUTED)
                                     .size(12.0),
                                 );
+                                if p.is_formule() {
+                                    egui::Frame::new()
+                                        .fill(alpha(PURPLE, 40))
+                                        .corner_radius(egui::CornerRadius::same(200))
+                                        .inner_margin(egui::Margin {
+                                            left: 8,
+                                            right: 8,
+                                            top: 2,
+                                            bottom: 2,
+                                        })
+                                        .show(ui, |ui| {
+                                            ui.label(
+                                                egui::RichText::new("Formule")
+                                                    .color(PURPLE)
+                                                    .size(11.0)
+                                                    .strong(),
+                                            );
+                                        });
+                                    let composition = p
+                                        .items
+                                        .iter()
+                                        .map(|i| format!("{} ×{}", i.name, i.qty))
+                                        .collect::<Vec<_>>()
+                                        .join(", ");
+                                    if !composition.is_empty() {
+                                        ui.label(
+                                            egui::RichText::new(composition)
+                                                .color(alpha(MUTED, 220))
+                                                .size(11.0),
+                                        );
+                                    }
+                                }
                                 if let Some(d) = &p.description {
                                     if !d.is_empty() {
                                         ui.label(
@@ -2311,6 +2697,13 @@ impl ShopApp {
 
                 ui.add_space(12.0);
 
+                // Compte : tout le détail est regroupé dans une modale.
+                if btn_primary(ui, "Gérer le compte").clicked() {
+                    self.account_modal = true;
+                }
+
+                ui.add_space(12.0);
+
                 // Espace fournisseur
                 if u.is_supplier() {
                     card(ui, |ui| {
@@ -2427,6 +2820,10 @@ impl ShopApp {
                         _ => fetch_products(self.tx.clone(), self.token.clone()),
                     }
                 }
+                // Entrée unique de création : le dialogue propose le bon formulaire.
+                if btn_primary(ui, "Créer").clicked() {
+                    self.create_menu = true;
+                }
             });
         });
         ui.add_space(8.0);
@@ -2441,7 +2838,8 @@ impl ShopApp {
         let editing = self.editing_id;
         let cat_names: Vec<String> = self.catégories.iter().map(|c| c.name.clone()).collect();
 
-        // Formulaire (en haut, toujours visible)
+        // Le formulaire n'apparaît qu'après « Créer > Produit » ou une modification.
+        if self.product_form_open {
         card(ui, |ui| {
             ui.label(
                 egui::RichText::new(if editing.is_some() {
@@ -2536,7 +2934,7 @@ impl ShopApp {
                     .clicked()
                 {
                     if let Some(t) = self.token.clone() {
-                        upload_image(self.tx.clone(), t, path);
+                        upload_image(self.tx.clone(), t, path, ImageTarget::Product);
                     }
                 }
             });
@@ -2603,13 +3001,28 @@ impl ShopApp {
                             }
                         }
                         self.reset_product_form();
+                        self.product_form_open = false;
                     }
                 });
-                if editing.is_some() && btn_ghost(ui, "Annuler").clicked() {
+                if btn_ghost(ui, "Fermer").clicked() {
                     self.reset_product_form();
+                    self.product_form_open = false;
                 }
             });
         });
+        } else {
+            card(ui, |ui| {
+                ui.label(
+                    egui::RichText::new("Utilisez « Créer » pour ajouter un produit ou une formule.")
+                        .color(MUTED)
+                        .size(12.0),
+                );
+            });
+        }
+
+        if self.formule_form_open {
+            self.ui_admin_formules(ui, &cat_names);
+        }
 
         ui.add_space(12.0);
         ui.horizontal(|ui| {
@@ -2641,9 +3054,22 @@ impl ShopApp {
                             self.product_thumb(ui, p.image_url.as_deref(), 52.0);
                             ui.add_space(10.0);
                             ui.vertical(|ui| {
-                                ui.label(
-                                    egui::RichText::new(&p.name).strong().size(14.0).color(TEXT),
-                                );
+                                ui.horizontal(|ui| {
+                                    ui.label(
+                                        egui::RichText::new(&p.name)
+                                            .strong()
+                                            .size(14.0)
+                                            .color(TEXT),
+                                    );
+                                    if p.is_formule() {
+                                        ui.label(
+                                            egui::RichText::new("Formule")
+                                                .size(10.0)
+                                                .strong()
+                                                .color(PURPLE),
+                                        );
+                                    }
+                                });
                                 ui.label(
                                     egui::RichText::new(format!(
                                         "{}  ·  vente {}  ·  coût {}",
@@ -2667,27 +3093,53 @@ impl ShopApp {
                                 |ui| {
                                     if icon_btn(ui, Icon::Trash, alpha(RED, 34), RED, 32.0) {
                                         if let Some(t) = self.token.clone() {
-                                            delete_product(self.tx.clone(), t, p.id);
+                                            if p.is_formule() {
+                                                delete_formule(self.tx.clone(), t, p.id);
+                                            } else {
+                                                delete_product(self.tx.clone(), t, p.id);
+                                            }
                                         }
                                         if self.editing_id == Some(p.id) {
                                             self.reset_product_form();
                                         }
+                                        if self.formule_editing_id == Some(p.id) {
+                                            self.reset_formule_form();
+                                        }
                                     }
                                     ui.add_space(6.0);
                                     if icon_btn(ui, Icon::Edit, GREY, TEXT, 32.0) {
-                                        self.editing_id = Some(p.id);
-                                        self.new_prod_name = p.name.clone();
-                                        self.new_prod_price =
-                                            format!("{:.2}", p.price_cents as f64 / 100.0);
-                                        self.new_prod_cost =
-                                            format!("{:.2}", p.cost_cents as f64 / 100.0);
-                                        self.new_prod_category = p.category.clone();
-                                        self.new_prod_desc =
-                                            p.description.clone().unwrap_or_default();
-                                        self.new_prod_available = p.available;
-                                        self.new_prod_image =
-                                            p.image_url.clone().unwrap_or_default();
-                                        self.image_path.clear();
+                                        if p.is_formule() {
+                                            self.formule_editing_id = Some(p.id);
+                                            self.new_form_name = p.name.clone();
+                                            self.new_form_price =
+                                                format!("{:.2}", p.price_cents as f64 / 100.0);
+                                            self.new_form_category = p.category.clone();
+                                            self.new_form_desc =
+                                                p.description.clone().unwrap_or_default();
+                                            self.new_form_available = p.available;
+                                            self.new_form_image =
+                                                p.image_url.clone().unwrap_or_default();
+                                            self.new_form_items = p.items.clone();
+                                            self.form_image_path.clear();
+                                            self.product_form_open = false;
+                                            self.formule_form_open = true;
+                                        } else {
+                                            self.editing_id = Some(p.id);
+                                            self.new_prod_name = p.name.clone();
+                                            self.new_prod_price =
+                                                format!("{:.2}", p.price_cents as f64 / 100.0);
+                                            self.new_prod_cost =
+                                                format!("{:.2}", p.cost_cents as f64 / 100.0);
+                                            self.new_prod_category = p.category.clone();
+                                            self.new_prod_desc =
+                                                p.description.clone().unwrap_or_default();
+                                            self.new_prod_available = p.available;
+                                            self.new_prod_image =
+                                                p.image_url.clone().unwrap_or_default();
+                                            self.image_path.clear();
+                                            self.formule_form_open = false;
+                                            self.product_form_open = true;
+                                        }
                                     }
                                 },
                             );
@@ -2698,7 +3150,225 @@ impl ShopApp {
             });
     }
 
+    /// Formulaire de formule : composition à partir des produits existants.
+    fn ui_admin_formules(&mut self, ui: &mut egui::Ui, cat_names: &[String]) {
+        let editing = self.formule_editing_id;
+        // Une formule ne peut pas contenir une autre formule (règle serveur).
+        let choices: Vec<(i64, String)> = self
+            .products
+            .iter()
+            .filter(|p| !p.is_formule())
+            .map(|p| (p.id, p.name.clone()))
+            .collect();
+
+        card(ui, |ui| {
+            ui.label(
+                egui::RichText::new(if editing.is_some() {
+                    "Modifier la formule"
+                } else {
+                    "Nouvelle formule"
+                })
+                .strong()
+                .size(15.0)
+                .color(if editing.is_some() { ORANGE } else { PURPLE }),
+            );
+            ui.add_space(8.0);
+
+            ui.label(egui::RichText::new("Nom").color(MUTED).size(12.0));
+            ui.add(
+                egui::TextEdit::singleline(&mut self.new_form_name)
+                    .desired_width(f32::INFINITY)
+                    .margin(egui::Margin::same(10)),
+            );
+
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                ui.vertical(|ui| {
+                    ui.label(egui::RichText::new("Prix de vente").color(MUTED).size(12.0));
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.new_form_price)
+                            .hint_text("12,50")
+                            .margin(egui::Margin::same(10)),
+                    );
+                });
+                ui.add_space(8.0);
+                ui.vertical(|ui| {
+                    ui.label(egui::RichText::new("Catégorie").color(MUTED).size(12.0));
+                    egui::ComboBox::from_id_salt("formule_cat")
+                        .selected_text(if self.new_form_category.is_empty() {
+                            "Choisir...".to_string()
+                        } else {
+                            self.new_form_category.clone()
+                        })
+                        .width(200.0)
+                        .show_ui(ui, |ui| {
+                            for c in cat_names {
+                                ui.selectable_value(
+                                    &mut self.new_form_category,
+                                    c.clone(),
+                                    c,
+                                );
+                            }
+                        });
+                });
+            });
+
+            ui.add_space(6.0);
+            ui.label(egui::RichText::new("Description").color(MUTED).size(12.0));
+            ui.add(
+                egui::TextEdit::multiline(&mut self.new_form_desc)
+                    .desired_rows(2)
+                    .desired_width(f32::INFINITY)
+                    .margin(egui::Margin::same(10)),
+            );
+
+            ui.add_space(6.0);
+            ui.checkbox(&mut self.new_form_available, " Disponible");
+
+            ui.add_space(8.0);
+            ui.label(egui::RichText::new("Photo").color(MUTED).size(12.0));
+            ui.horizontal(|ui| {
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.form_image_path)
+                        .desired_width(f32::INFINITY)
+                        .hint_text("Chemin du fichier image")
+                        .margin(egui::Margin::same(10)),
+                );
+                if btn_ghost(ui, "Parcourir...").clicked() {
+                    if let Some(p) = rfd::FileDialog::new()
+                        .add_filter("Images", &["png", "jpg", "jpeg", "webp", "gif"])
+                        .pick_file()
+                    {
+                        self.form_image_path = p.to_string_lossy().into_owned();
+                    }
+                }
+                let path = self.form_image_path.clone();
+                if ui
+                    .add_enabled(!path.is_empty(), egui::Button::new(
+                        egui::RichText::new("Envoyer").color(egui::Color32::WHITE).strong(),
+                    ).fill(ORANGE).corner_radius(egui::CornerRadius::same(14)))
+                    .clicked()
+                {
+                    if let Some(t) = self.token.clone() {
+                        upload_image(self.tx.clone(), t, path, ImageTarget::Formule);
+                    }
+                }
+            });
+            if !self.new_form_image.is_empty() {
+                ui.label(
+                    egui::RichText::new(format!("Photo envoyée : {}", self.new_form_image))
+                        .size(11.0)
+                        .color(GREEN),
+                );
+            }
+
+            ui.add_space(10.0);
+            ui.label(
+                egui::RichText::new("Composition")
+                    .strong()
+                    .size(13.0)
+                    .color(TEXT),
+            );
+            let mut remove_item: Option<usize> = None;
+            for (idx, item) in self.new_form_items.iter_mut().enumerate() {
+                ui.horizontal(|ui| {
+                    let selected = choices
+                        .iter()
+                        .find(|(id, _)| *id == item.product_id)
+                        .map(|(_, name)| name.clone())
+                        .unwrap_or_else(|| "Choisir...".to_string());
+                    egui::ComboBox::from_id_salt(format!("formule_item_{}", idx))
+                        .selected_text(selected)
+                        .width(220.0)
+                        .show_ui(ui, |ui| {
+                            for (id, name) in &choices {
+                                ui.selectable_value(&mut item.product_id, *id, name);
+                            }
+                        });
+                    ui.label(egui::RichText::new("Quantité").color(MUTED).size(11.0));
+                    ui.add(egui::DragValue::new(&mut item.qty));
+                    if icon_btn(ui, Icon::Trash, alpha(RED, 34), RED, 28.0) {
+                        remove_item = Some(idx);
+                    }
+                });
+            }
+            if let Some(idx) = remove_item {
+                self.new_form_items.remove(idx);
+            }
+            if btn_ghost(ui, "Ajouter un produit").clicked() {
+                if let Some((id, _)) = choices.first() {
+                    self.new_form_items.push(FormuleItem {
+                        product_id: *id,
+                        qty: 1,
+                        name: String::new(),
+                    });
+                }
+            }
+            if choices.is_empty() {
+                ui.label(
+                    egui::RichText::new("Créez d'abord des produits pour composer la formule.")
+                        .color(MUTED)
+                        .size(11.0),
+                );
+            }
+
+            ui.add_space(10.0);
+            ui.horizontal(|ui| {
+                let ok = !self.new_form_name.trim().is_empty()
+                    && !self.new_form_category.trim().is_empty()
+                    && !self.new_form_items.is_empty()
+                    && self
+                        .new_form_items
+                        .iter()
+                        .all(|i| i.product_id > 0 && (1..=99).contains(&i.qty));
+                let label = if editing.is_some() {
+                    "Enregistrer"
+                } else {
+                    "Ajouter la formule"
+                };
+                ui.add_enabled_ui(ok, |ui| {
+                    if btn_primary(ui, label).clicked() {
+                        let name = self.new_form_name.trim().to_string();
+                        let price = euros_to_cents(&self.new_form_price);
+                        let cat = self.new_form_category.trim().to_string();
+                        let desc = if self.new_form_desc.trim().is_empty() {
+                            None
+                        } else {
+                            Some(self.new_form_desc.trim().to_string())
+                        };
+                        let img = if self.new_form_image.trim().is_empty() {
+                            None
+                        } else {
+                            Some(self.new_form_image.trim().to_string())
+                        };
+                        let avail = self.new_form_available;
+                        let items = self.new_form_items.clone();
+                        if let Some(t) = self.token.clone() {
+                            if let Some(id) = editing {
+                                update_formule(
+                                    self.tx.clone(), t, id, name, desc, price, cat, img, avail,
+                                    items,
+                                );
+                            } else {
+                                create_formule(
+                                    self.tx.clone(), t, name, desc, price, cat, img, avail, items,
+                                );
+                            }
+                        }
+                        self.reset_formule_form();
+                        self.formule_form_open = false;
+                    }
+                });
+                if btn_ghost(ui, "Fermer").clicked() {
+                    self.reset_formule_form();
+                    self.formule_form_open = false;
+                }
+            });
+        });
+    }
+
     fn ui_admin_catégories(&mut self, ui: &mut egui::Ui) {
+        if self.category_form_open {
         card(ui, |ui| {
             ui.label(
                 egui::RichText::new("Nouvelle catégorie")
@@ -2723,8 +3393,21 @@ impl ShopApp {
                         self.new_cat.clear();
                     }
                 });
+                if btn_ghost(ui, "Fermer").clicked() {
+                    self.category_form_open = false;
+                    self.new_cat.clear();
+                }
             });
         });
+        } else {
+            card(ui, |ui| {
+                ui.label(
+                    egui::RichText::new("Utilisez « Créer » pour ajouter une catégorie.")
+                        .color(MUTED)
+                        .size(12.0),
+                );
+            });
+        }
 
         ui.add_space(12.0);
         ui.horizontal(|ui| {
@@ -3261,13 +3944,21 @@ impl eframe::App for ShopApp {
                         self.upgrade_modal = true;
                     }
                     save_session(&t);
+                    // Le téléphone du profil est proposé par défaut à la commande.
+                    let phone = u.phone.clone().unwrap_or_default();
+                    if self.order_phone.trim().is_empty() && !phone.is_empty() {
+                        self.order_phone = phone;
+                    }
+                    self.account_email = u.email.clone().unwrap_or_default();
+                    self.account_phone = u.phone.clone().unwrap_or_default();
                     self.user = Some(u);
-                    self.token = Some(t);
+                    self.token = Some(t.clone());
                     self.busy = false;
                     self.screen = Screen::Boutique;
                     self.set_notice("Connecté");
                     fetch_products(self.tx.clone(), self.token.clone());
                     fetch_catégories(self.tx.clone(), self.token.clone());
+                    fetch_account(self.tx.clone(), t);
                     self.reload_orders();
                     self.last_poll = Some(Instant::now());
                 }
@@ -3278,10 +3969,11 @@ impl eframe::App for ShopApp {
                 Msg::UpgradeOk(u, t) => {
                     save_session(&t);
                     self.user = Some(u);
-                    self.token = Some(t);
+                    self.token = Some(t.clone());
                     self.busy = false;
                     self.upgrade_modal = false;
                     self.set_notice("Compte créé — vos données sont conservées");
+                    fetch_account(self.tx.clone(), t);
                 }
                 Msg::UpgradeErr(e) => {
                     self.busy = false;
@@ -3289,6 +3981,8 @@ impl eframe::App for ShopApp {
                 }
                 Msg::RoleUpdated(u) => {
                     let now_supplier = u.is_supplier();
+                    self.account_email = u.email.clone().unwrap_or_default();
+                    self.account_phone = u.phone.clone().unwrap_or_default();
                     self.user = Some(u);
                     self.screen = Screen::Profile;
                     if now_supplier {
@@ -3310,6 +4004,36 @@ impl eframe::App for ShopApp {
                     }
                 }
                 Msg::Products(p) => self.products = p,
+                Msg::Account(a) => {
+                    // Garde le header et le formulaire de commande synchronisés.
+                    let previous_phone = self
+                        .account
+                        .as_ref()
+                        .and_then(|old| old.phone.clone())
+                        .unwrap_or_default();
+                    let new_phone = a.phone.clone().unwrap_or_default();
+                    self.account_email = a.email.clone().unwrap_or_default();
+                    self.account_phone = new_phone.clone();
+                    if self.order_phone.trim().is_empty()
+                        || (!previous_phone.is_empty() && self.order_phone == previous_phone)
+                    {
+                        self.order_phone = new_phone;
+                    }
+                    if let Some(u) = self.user.as_mut() {
+                        u.id = a.id;
+                        u.name = a.name.clone();
+                        u.role = a.role.clone();
+                        u.email = a.email.clone();
+                        u.phone = a.phone.clone();
+                        u.avatar_url = a.avatar_url.clone();
+                        u.provider = a.provider.clone();
+                    }
+                    self.account = Some(a);
+                }
+                Msg::AccountDeleted => {
+                    self.logout();
+                    self.set_notice("Compte supprimé. Vos finances restent conservées.");
+                }
                 Msg::Orders(o) => self.orders = o,
                 Msg::Summary(s) => self.summary = Some(s),
                 Msg::Expenses(e) => self.expenses = e,
@@ -3336,9 +4060,17 @@ impl eframe::App for ShopApp {
                     self.screen = Screen::Orders;
                     self.reload_orders();
                 }
-                Msg::ImageUploaded(url) => {
-                    self.new_prod_image = url;
-                    self.image_path.clear();
+                Msg::ImageUploaded(url, target) => {
+                    match target {
+                        ImageTarget::Product => {
+                            self.new_prod_image = url;
+                            self.image_path.clear();
+                        }
+                        ImageTarget::Formule => {
+                            self.new_form_image = url;
+                            self.form_image_path.clear();
+                        }
+                    }
                     self.set_notice("Photo envoyée");
                 }
                 Msg::ImageLoaded(url, img) => {
@@ -3722,6 +4454,16 @@ impl eframe::App for ShopApp {
             self.set_notice("Chat réservé aux comptes GitHub ou Google.");
         }
 
+        // Petit dialogue de création (produit / formule / catégorie).
+        if self.create_menu {
+            self.draw_create_modal(ctx);
+        }
+
+        // Gestion du compte : modale bloquante ouverte depuis le profil.
+        if self.account_modal {
+            self.draw_account_modal(ctx);
+        }
+
         ctx.request_repaint_after(Duration::from_secs(1));
     }
 }
@@ -3838,6 +4580,273 @@ impl ShopApp {
                         );
                     });
             });
+    }
+
+    /// Modale « Gérer le compte » : coordonnées, mot de passe et identités
+    /// liées. Fond bloquant + Area centrée, comme pour l'upgrade obligatoire.
+    fn draw_account_modal(&mut self, ctx: &egui::Context) {
+        let screen = ctx.screen_rect();
+        egui::Area::new(egui::Id::new("account_blocker"))
+            .fixed_pos(egui::pos2(0.0, 0.0))
+            .show(ctx, |ui| {
+                ui.painter()
+                    .rect_filled(screen, 0.0, egui::Color32::from_black_alpha(215));
+            });
+
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            self.account_modal = false;
+            return;
+        }
+
+        let has_password = self
+            .account
+            .as_ref()
+            .map(|a| a.has_password)
+            .unwrap_or(false);
+        let identities = self
+            .account
+            .as_ref()
+            .map(|a| a.identities.clone())
+            .unwrap_or_default();
+        let tx = self.tx.clone();
+        let token = self.token.clone();
+
+        egui::Area::new(egui::Id::new("account_modal"))
+            .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+            .show(ctx, |ui| {
+                egui::Frame::new()
+                    .fill(SURFACE)
+                    .corner_radius(egui::CornerRadius::same(18))
+                    .inner_margin(egui::Margin::same(22))
+                    .stroke(egui::Stroke::new(1.0_f32, ORANGE))
+                    .show(ui, |ui| {
+                        ui.set_min_width(380.0);
+                        ui.set_max_width(520.0);
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                egui::RichText::new("Mon compte")
+                                    .size(19.0)
+                                    .strong()
+                                    .color(TEXT),
+                            );
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    if btn_ghost(ui, "Fermer").clicked() {
+                                        self.account_modal = false;
+                                    }
+                                },
+                            );
+                        });
+                        ui.add_space(10.0);
+
+                        egui::ScrollArea::vertical()
+                            .max_height((screen.height() * 0.8).max(200.0))
+                            .show(ui, |ui| {
+                                ui.label(egui::RichText::new("Email").color(MUTED).size(12.0));
+                                ui.add(
+                                    egui::TextEdit::singleline(&mut self.account_email)
+                                        .desired_width(f32::INFINITY)
+                                        .hint_text("vous@exemple.com")
+                                        .margin(egui::Margin::same(10)),
+                                );
+                                ui.add_space(6.0);
+                                ui.label(
+                                    egui::RichText::new("Téléphone").color(MUTED).size(12.0),
+                                );
+                                ui.add(
+                                    egui::TextEdit::singleline(&mut self.account_phone)
+                                        .desired_width(f32::INFINITY)
+                                        .hint_text("Utilisé pour vos commandes")
+                                        .margin(egui::Margin::same(10)),
+                                );
+                                ui.add_space(6.0);
+                                ui.label(
+                                    egui::RichText::new(format!(
+                                        "Mot de passe : {}",
+                                        if has_password { "défini" } else { "non défini" }
+                                    ))
+                                    .color(MUTED)
+                                    .size(12.0),
+                                );
+                                ui.add_space(8.0);
+                                ui.horizontal(|ui| {
+                                    let email = self.account_email.trim().to_string();
+                                    let phone = self.account_phone.trim().to_string();
+                                    if btn_primary(ui, "Enregistrer").clicked() {
+                                        if let Some(t) = token.clone() {
+                                            update_account(tx.clone(), t, email, phone);
+                                        }
+                                    }
+                                    if btn_ghost(ui, "Rafraîchir").clicked() {
+                                        if let Some(t) = token.clone() {
+                                            fetch_account(tx.clone(), t);
+                                        }
+                                    }
+                                });
+
+                                ui.add_space(12.0);
+                                ui.label(
+                                    egui::RichText::new("Connexions liées")
+                                        .strong()
+                                        .size(13.0)
+                                        .color(TEXT),
+                                );
+                                if identities.is_empty() {
+                                    ui.label(
+                                        egui::RichText::new("Aucune identité liée.")
+                                            .color(MUTED)
+                                            .size(12.0),
+                                    );
+                                }
+                                for identity in &identities {
+                                    ui.add_space(4.0);
+                                    ui.horizontal(|ui| {
+                                        ui.label(
+                                            egui::RichText::new(&identity.provider)
+                                                .strong()
+                                                .size(12.0)
+                                                .color(TEXT),
+                                        );
+                                        if let Some(email) =
+                                            identity.email.as_ref().filter(|e| !e.is_empty())
+                                        {
+                                            ui.label(
+                                                egui::RichText::new(email).color(MUTED).size(11.0),
+                                            );
+                                        }
+                                        if let Some(date) = &identity.created_at {
+                                            let day: String = date.chars().take(10).collect();
+                                            ui.label(
+                                                egui::RichText::new(day).color(MUTED).size(10.0),
+                                            );
+                                        }
+                                        ui.with_layout(
+                                            egui::Layout::right_to_left(egui::Align::Center),
+                                            |ui| {
+                                                let provider = identity.provider.clone();
+                                                if btn_ghost(ui, "Dissocier").clicked() {
+                                                    if let Some(t) = token.clone() {
+                                                        unlink_account(tx.clone(), t, provider);
+                                                    }
+                                                }
+                                            },
+                                        );
+                                    });
+                                }
+                                ui.add_space(8.0);
+                                ui.horizontal_wrapped(|ui| {
+                                    for (provider, label) in
+                                        [("github", "Lier GitHub"), ("google", "Lier Google")]
+                                    {
+                                        if identities.iter().any(|i| i.provider == provider) {
+                                            continue;
+                                        }
+                                        if btn_ghost(ui, label).clicked() {
+                                            if let Some(t) = token.clone() {
+                                                link_account(tx.clone(), t, provider);
+                                            }
+                                        }
+                                    }
+                                });
+
+                                ui.add_space(12.0);
+                                ui.label(
+                                    egui::RichText::new(
+                                        "La suppression du compte conserve l'historique financier sur le serveur.",
+                                    )
+                                    .color(MUTED)
+                                    .size(11.0),
+                                );
+                                if self.account_confirm_delete {
+                                    ui.add_space(6.0);
+                                    ui.label(
+                                        egui::RichText::new(
+                                            "Confirmez la suppression définitive de votre compte ?",
+                                        )
+                                        .color(RED)
+                                        .size(12.0)
+                                        .strong(),
+                                    );
+                                    ui.horizontal(|ui| {
+                                        if btn_danger(ui, "Confirmer la suppression").clicked() {
+                                            if let Some(t) = token.clone() {
+                                                delete_account(tx.clone(), t);
+                                            }
+                                            self.account_confirm_delete = false;
+                                        }
+                                        if btn_ghost(ui, "Annuler").clicked() {
+                                            self.account_confirm_delete = false;
+                                        }
+                                    });
+                                } else if btn_danger(ui, "Supprimer mon compte").clicked() {
+                                    self.account_confirm_delete = true;
+                                }
+                            });
+                    });
+            });
+    }
+
+    /// Dialogue léger ouvert par le bouton « Créer » de l'espace fournisseur.
+    /// Une seule entrée pour choisir le type d'élément à ajouter.
+    fn draw_create_modal(&mut self, ctx: &egui::Context) {
+        let mut open = self.create_menu;
+        let mut choice: Option<usize> = None;
+        let mut close_clicked = false;
+        egui::Window::new("Créer")
+            .open(&mut open)
+            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+            .collapsible(false)
+            .resizable(false)
+            .show(ctx, |ui| {
+                ui.set_min_width(260.0);
+                ui.label(
+                    egui::RichText::new("Que souhaitez-vous ajouter ?")
+                        .strong()
+                        .size(14.0)
+                        .color(TEXT),
+                );
+                ui.add_space(8.0);
+                if btn_primary(ui, "Produit").clicked() {
+                    choice = Some(0);
+                }
+                if btn_ghost(ui, "Formule").clicked() {
+                    choice = Some(1);
+                }
+                if btn_ghost(ui, "Catégorie").clicked() {
+                    choice = Some(2);
+                }
+                ui.add_space(4.0);
+                if btn_ghost(ui, "Fermer").clicked() {
+                    choice = None;
+                    close_clicked = true;
+                }
+            });
+
+        self.create_menu = open && choice.is_none() && !close_clicked;
+        match choice {
+            Some(0) => {
+                self.admin_tab = 0;
+                self.reset_formule_form();
+                self.formule_form_open = false;
+                self.reset_product_form();
+                self.product_form_open = true;
+            }
+            Some(1) => {
+                self.admin_tab = 0;
+                self.reset_product_form();
+                self.product_form_open = false;
+                self.reset_formule_form();
+                self.formule_form_open = true;
+            }
+            Some(2) => {
+                self.admin_tab = 1;
+                self.new_cat.clear();
+                self.rename_id = None;
+                self.category_form_open = true;
+            }
+            _ => {}
+        }
     }
 }
 

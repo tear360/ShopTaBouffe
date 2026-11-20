@@ -9,8 +9,10 @@ import { db, ensureReady } from './db.js';
 import { seedIfEmpty } from './seed.js';
 import { initSockets, getIO } from './sockets.js';
 import authRoutes from './routes/auth.js';
+import accountRoutes from './routes/account.js';
 import adminRoutes from './routes/admin.js';
 import productRoutes from './routes/products.js';
+import formuleRoutes from './routes/formules.js';
 import categoryRoutes from './routes/categories.js';
 import financeRoutes from './routes/finances.js';
 import orderRoutes from './routes/orders.js';
@@ -37,8 +39,10 @@ app.use(cookieParser());
 app.use('/api', (req, res, next) => {
   const start = Date.now();
   res.on('finish', () => {
+    // Le jeton de liaison OAuth transite dans l'URL : ne jamais le journaliser.
+    const safeUrl = req.originalUrl.replace(/([?&]token=)[^&]*/gi, '$1[redacted]');
     console.log(
-      `${new Date().toISOString()} ${req.method} ${req.originalUrl} ${res.statusCode} (${Date.now() - start}ms)`
+      `${new Date().toISOString()} ${req.method} ${safeUrl} ${res.statusCode} (${Date.now() - start}ms)`
     );
   });
   next();
@@ -49,8 +53,10 @@ app.get('/api/health', (_req, res) => {
 });
 
 app.use('/api/auth', authRoutes);
+app.use('/api/account', accountRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/products', productRoutes);
+app.use('/api/formules', formuleRoutes);
 app.use('/api/categories', categoryRoutes);
 app.use('/api/finances', financeRoutes);
 app.use('/api/orders', orderRoutes);

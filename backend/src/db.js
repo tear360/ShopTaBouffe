@@ -23,12 +23,27 @@ CREATE TABLE IF NOT EXISTS users (
   provider_id TEXT NOT NULL,
   name        TEXT NOT NULL DEFAULT '',
   email       TEXT,
+  phone       TEXT,
   avatar_url  TEXT,
   role        TEXT NOT NULL DEFAULT 'customer',
   password_hash TEXT,
   created_at  TEXT NOT NULL,
   UNIQUE (provider, provider_id)
 );
+
+-- Un compte peut avoir plusieurs identités (mot de passe, GitHub, Google).
+-- La table users garde l'identité "principale" historique pour les token/roles.
+CREATE TABLE IF NOT EXISTS user_identities (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  provider    TEXT NOT NULL,
+  provider_id TEXT NOT NULL,
+  email       TEXT,
+  avatar_url  TEXT,
+  created_at  TEXT NOT NULL,
+  UNIQUE (provider, provider_id)
+);
+CREATE INDEX IF NOT EXISTS idx_user_identities_user ON user_identities(user_id);
 
 CREATE TABLE IF NOT EXISTS supplier_sessions (
   token      TEXT PRIMARY KEY,
@@ -63,6 +78,18 @@ CREATE TABLE IF NOT EXISTS products (
   available   INTEGER NOT NULL DEFAULT 1,
   created_at  TEXT NOT NULL
 );
+
+-- Une formule est un produit de type "formule" : elle garde un id, un prix,
+-- une image et une catégorie, donc elle passe dans le panier, les commandes,
+-- les finances et les catégories sans logique parallèle.
+CREATE TABLE IF NOT EXISTS formule_items (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  formule_id  INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  product_id  INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  qty         INTEGER NOT NULL,
+  UNIQUE (formule_id, product_id)
+);
+CREATE INDEX IF NOT EXISTS idx_formule_items_formule ON formule_items(formule_id);
 
 CREATE TABLE IF NOT EXISTS orders (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -139,10 +166,28 @@ CREATE TABLE IF NOT EXISTS expenses (
 );
 `);
 
+// Migration : téléphone sur les comptes existants (créé directement dans le CREATE ci-dessus).
+const userCols = db.prepare('PRAGMA table_info(users)').all();
+if (!userCols.some((c) => c.name === 'phone')) {
+  db.exec('ALTER TABLE users ADD COLUMN phone TEXT');
+}
+
+// Les comptes existants ont leur identité dans `users` : on la duplique dans
+// `user_identities` pour que liaison / dissociation fonctionne aussi pour eux.
+db.prepare(
+  `INSERT OR IGNORE INTO user_identities
+     (user_id, provider, provider_id, email, avatar_url, created_at)
+   SELECT id, provider, provider_id, email, avatar_url, created_at FROM users`
+).run();
+
 // Migration : prix de revient sur les produits (coût d'achat → marge).
 const productCols = db.prepare('PRAGMA table_info(products)').all();
 if (!productCols.some((c) => c.name === 'cost_cents')) {
   db.exec('ALTER TABLE products ADD COLUMN cost_cents INTEGER NOT NULL DEFAULT 0');
+}
+// Type de produit : 'product' (défaut) ou 'formule' (assemblage de produits).
+if (!productCols.some((c) => c.name === 'kind')) {
+  db.exec("ALTER TABLE products ADD COLUMN kind TEXT NOT NULL DEFAULT 'product'");
 }
 
 // Seed des catégories (une seule fois, pas au redémarrage après suppression).
@@ -178,16 +223,30 @@ export function toUser(row) {
     provider: row.provider,
     name: row.name,
     email: row.email ?? null,
+    phone: row.phone ?? null,
     avatarUrl: row.avatar_url ?? null,
     role: row.role,
     createdAt: row.created_at,
   };
 }
 
-/** Ligne products → objet Product. */
+/** Composition d'une formule : [{ productId, qty, name }]. */
+export function formuleItems(formuleId) {
+  return db
+    .prepare(
+      `SELECT fi.product_id, fi.qty, p.name
+       FROM formule_items fi JOIN products p ON p.id = fi.product_id
+       WHERE fi.formule_id = ? ORDER BY p.name`
+    )
+    .all(formuleId)
+    .map((r) => ({ productId: r.product_id, qty: r.qty, name: r.name }));
+}
+
+/** Ligne products → objet Product (avec `kind` et `items` pour les formules). */
 export function toProduct(row) {
   if (!row) return null;
-  return {
+  const kind = row.kind === 'formule' ? 'formule' : 'product';
+  const out = {
     id: row.id,
     name: row.name,
     description: row.description ?? '',
@@ -197,5 +256,8 @@ export function toProduct(row) {
     imageUrl: row.image_url ?? '',
     available: !!row.available,
     createdAt: row.created_at,
+    kind,
   };
+  if (kind === 'formule') out.items = formuleItems(row.id);
+  return out;
 }

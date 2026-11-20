@@ -245,11 +245,23 @@ private fun ProductSheet(
 
             Spacer(Modifier.height(4.dp))
             Text(
-                product.category,
+                if (product.isFormule) "${product.category} · Formule" else product.category,
                 modifier = Modifier.padding(horizontal = 16.dp),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.primary,
             )
+
+            if (product.isFormule && product.items.isNotEmpty()) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "Contenu : " + product.items.joinToString(", ") {
+                        "${it.qty}× ${it.name ?: "produit"}"
+                    },
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
 
             if (!product.description.isNullOrBlank()) {
                 Spacer(Modifier.height(12.dp))
@@ -325,6 +337,20 @@ private fun ProductCard(
                         .height(118.dp),
                     cornerRadius = 0.dp,
                 )
+                if (product.isFormule) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.primary,
+                        shape = RoundedCornerShape(bottomStart = 12.dp),
+                        modifier = Modifier.align(Alignment.TopEnd),
+                    ) {
+                        Text(
+                            "Formule",
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onPrimary,
+                        )
+                    }
+                }
                 if (!product.available) {
                     Surface(
                         color = MaterialTheme.colorScheme.error,

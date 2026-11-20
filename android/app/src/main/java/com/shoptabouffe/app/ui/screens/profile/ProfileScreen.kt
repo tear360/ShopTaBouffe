@@ -25,6 +25,8 @@ import androidx.compose.material.icons.outlined.NotificationsOff
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Storefront
 import androidx.compose.material.icons.outlined.VerifiedUser
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -49,6 +51,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.shoptabouffe.app.BuildConfig
@@ -57,7 +60,9 @@ import com.shoptabouffe.app.core.Api
 import com.shoptabouffe.app.core.ApiResult
 import com.shoptabouffe.app.core.Config
 import com.shoptabouffe.app.core.SocketManager
+import com.shoptabouffe.app.core.models.AccountInfo
 import com.shoptabouffe.app.core.models.CodeBody
+import com.shoptabouffe.app.core.models.Identity
 import com.shoptabouffe.app.core.models.User
 import android.Manifest
 import android.content.Intent
@@ -84,6 +89,21 @@ fun ProfileScreen(user: User, vm: MainViewModel) {
     val socketConnected by SocketManager.connected.collectAsStateWithLifecycle()
     val updateState by vm.update.collectAsStateWithLifecycle()
     val updateNotice by vm.updateNotice.collectAsStateWithLifecycle()
+    val account by vm.account.collectAsStateWithLifecycle()
+    val accountBusy by vm.accountBusy.collectAsStateWithLifecycle()
+    val accountNotice by vm.accountNotice.collectAsStateWithLifecycle()
+    val needsUpgrade by vm.needsUpgrade.collectAsStateWithLifecycle()
+    val upgradeActive = needsUpgrade != null
+
+    LaunchedEffect(Unit) { vm.loadAccount() }
+
+    var showAccountDialog by remember { mutableStateOf(false) }
+
+    // Un ancien compte « demo » doit d'abord finaliser son upgrade : la gestion
+    // du compte reste inaccessible tant que ce formulaire obligatoire est actif.
+    LaunchedEffect(upgradeActive) {
+        if (upgradeActive) showAccountDialog = false
+    }
 
     var code by rememberSaveable { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
@@ -101,6 +121,13 @@ fun ProfileScreen(user: User, vm: MainViewModel) {
         updateNotice?.let {
             snackbar.showSnackbar(it)
             vm.consumeUpdateNotice()
+        }
+    }
+
+    LaunchedEffect(accountNotice) {
+        accountNotice?.let {
+            snackbar.showSnackbar(it)
+            vm.consumeAccountNotice()
         }
     }
 
@@ -158,6 +185,16 @@ fun ProfileScreen(user: User, vm: MainViewModel) {
                             }
                         }
                     }
+                }
+
+                item { SectionHeader(title = "Mon compte") }
+
+                item {
+                    OutlinedButton(
+                        onClick = { showAccountDialog = true },
+                        enabled = !upgradeActive,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("Gérer le compte") }
                 }
 
                 item { SectionHeader(title = "Espace fournisseur") }
@@ -358,6 +395,210 @@ fun ProfileScreen(user: User, vm: MainViewModel) {
                 .align(Alignment.BottomCenter)
                 .padding(16.dp),
         )
+    }
+
+    if (showAccountDialog) {
+        AlertDialog(
+            onDismissRequest = { if (!accountBusy) showAccountDialog = false },
+            title = { Text("Mon compte") },
+            text = {
+                AccountCard(
+                    account = account,
+                    busy = accountBusy || upgradeActive,
+                    onSave = { email, phone -> vm.patchAccount(email, phone) },
+                    onLink = { provider -> vm.linkAccount(provider, context) },
+                    onUnlink = vm::unlinkAccount,
+                    onDelete = {
+                        showAccountDialog = false
+                        vm.deleteAccount()
+                    },
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { showAccountDialog = false }) { Text("Fermer") }
+            },
+        )
+    }
+}
+
+/* --------------------------------------------------------------- compte */
+
+/** Carte « Mon compte » : coordonnées, identités liées et suppression. */
+@Composable
+private fun AccountCard(
+    account: AccountInfo?,
+    busy: Boolean,
+    onSave: (String, String) -> Unit,
+    onLink: (String) -> Unit,
+    onUnlink: (String) -> Unit,
+    onDelete: () -> Unit,
+) {
+    var email by remember(account?.email) { mutableStateOf(account?.email.orEmpty()) }
+    var phone by remember(account?.phone) { mutableStateOf(account?.phone.orEmpty()) }
+    var confirmDelete by remember { mutableStateOf(false) }
+
+    Surface(
+        shape = RoundedCornerShape(20.dp),
+        color = MaterialTheme.colorScheme.surface,
+        shadowElevation = 1.dp,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            if (account == null) {
+                Text(
+                    "Chargement des informations du compte…",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                Text(
+                    "Connexion : ${Config.providerLabel(account.provider ?: "inconnu")}",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Text(
+                    "Mot de passe : ${if (account.hasPassword) "configuré" else "aucun"}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+
+                OutlinedTextField(
+                    value = email,
+                    onValueChange = { email = it.take(180) },
+                    label = { Text("Email (facultatif)") },
+                    singleLine = true,
+                    shape = RoundedCornerShape(14.dp),
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Email,
+                        imeAction = ImeAction.Next,
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = phone,
+                    onValueChange = { phone = it.take(30) },
+                    label = { Text("Téléphone") },
+                    singleLine = true,
+                    shape = RoundedCornerShape(14.dp),
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Phone,
+                        imeAction = ImeAction.Done,
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                PrimaryButton(
+                    text = "Enregistrer les coordonnées",
+                    onClick = { onSave(email, phone) },
+                    enabled = !busy,
+                    loading = busy,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+
+                HorizontalDivider()
+
+                Text("Identités liées", style = MaterialTheme.typography.titleSmall)
+                if (account.identities.isEmpty()) {
+                    Text(
+                        "Aucune identité liée pour le moment.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                account.identities.forEach { identity ->
+                    IdentityRow(identity = identity, busy = busy, onUnlink = onUnlink)
+                }
+
+                val linkable = listOf("github", "google").filterNot { provider ->
+                    account.identities.any { it.provider == provider }
+                }
+                if (linkable.isNotEmpty()) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        linkable.forEach { provider ->
+                            OutlinedButton(
+                                onClick = { onLink(provider) },
+                                enabled = !busy,
+                                modifier = Modifier.weight(1f),
+                            ) { Text("Lier ${Config.providerLabel(provider)}") }
+                        }
+                    }
+                }
+
+                HorizontalDivider()
+
+                TextButton(
+                    onClick = { confirmDelete = true },
+                    enabled = !busy,
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = MaterialTheme.colorScheme.error,
+                    ),
+                    modifier = Modifier.padding(start = 0.dp),
+                ) { Text("Supprimer mon compte") }
+                Text(
+                    "Le journal financier du serveur est conservé après la suppression.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+
+    if (confirmDelete) {
+        AlertDialog(
+            onDismissRequest = { if (!busy) confirmDelete = false },
+            title = { Text("Supprimer définitivement le compte ?") },
+            text = {
+                Text(
+                    "Votre profil, vos commandes et vos conversations seront supprimés. " +
+                        "Cette action est irréversible ; le journal financier reste conservé sur le serveur.",
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        confirmDelete = false
+                        onDelete()
+                    },
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = MaterialTheme.colorScheme.error,
+                    ),
+                ) { Text("Supprimer") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmDelete = false }) { Text("Annuler") }
+            },
+        )
+    }
+}
+
+@Composable
+private fun IdentityRow(
+    identity: Identity,
+    busy: Boolean,
+    onUnlink: (String) -> Unit,
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(Config.providerLabel(identity.provider), style = MaterialTheme.typography.bodyMedium)
+            Text(
+                identity.email ?: "—",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        if (identity.provider == "github" || identity.provider == "google") {
+            TextButton(
+                onClick = { onUnlink(identity.provider) },
+                enabled = !busy,
+                colors = ButtonDefaults.textButtonColors(
+                    contentColor = MaterialTheme.colorScheme.error,
+                ),
+            ) { Text("Dissocier") }
+        }
     }
 }
 

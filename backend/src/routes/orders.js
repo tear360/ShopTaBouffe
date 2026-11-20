@@ -86,7 +86,10 @@ router.post('/', requireAuth, (req, res) => {
   }
   const address = typeof body.address === 'string' ? body.address.trim() : '';
   if (address.length < 3 || address.length > 200) errors.push('address: 3 à 200 caractères');
-  const phone = typeof body.phone === 'string' ? body.phone.trim() : '';
+  // Le numéro enregistré dans le compte sert de valeur par défaut : le client
+  // peut le pré-remplir, mais un envoi sans champ reste valide.
+  const phoneRaw = typeof body.phone === 'string' ? body.phone.trim() : '';
+  const phone = phoneRaw || (req.user.phone ? String(req.user.phone).trim() : '');
   if (phone.length < 6 || phone.length > 30) errors.push('phone: 6 à 30 caractères');
   const note = body.note == null ? '' : body.note;
   if (typeof note !== 'string' || note.length > 500) errors.push('note: 500 caractères max');

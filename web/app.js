@@ -69,7 +69,7 @@ function emojiFor(category) { return ICONS.box; }
 
 function icon(name) { return ICONS[name] || ''; }
 
-const PROVIDER_LABELS = { github: 'GitHub', google: 'Google', demo: 'Invité' };
+const PROVIDER_LABELS = { github: 'GitHub', google: 'Google', local: 'Mot de passe', demo: 'Invité' };
 
 /* Logos OAuth (SVG inline <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg> lisibles sur fond sombre comme sur clair). */
 const LOGO_GOOGLE = `<svg class="plogo" viewBox="0 0 24 24" aria-hidden="true">
@@ -107,6 +107,8 @@ const state = {
   loginMode: 'login', loginUsername: '', loginPassword: '',
   regName: '', regUsername: '', regPassword: '', regBusy: false, regError: null,
   upgradeModal: false, upgradeName: '', upgradeUsername: '', upgradePassword: '', upgradeBusy: false, upgradeError: null,
+  // compte
+  account: null, accountBusy: false, accountError: null,
   socket: null, joinedConv: null,
 };
 
@@ -247,6 +249,8 @@ function loginErrorFromUrl() {
     state_mismatch: 'Session expirée, réessayez la connexion.',
     provider_error: 'Erreur pendant la connexion, réessayez.',
     missing_code: 'Erreur pendant la connexion, réendez-vous.',
+    link_invalid: 'Session expirée, reconnectez-vous avant de lier un compte.',
+    identity_taken: 'Cette identité est déjà liée à un autre compte.',
   };
   return map[err] || 'Erreur pendant la connexion.';
 }
@@ -460,7 +464,7 @@ function productCard(p) {
     <div class="body">
       <div class="row">
         <span class="name">${h(p.name)}</span>
-        <span class="tag">${h(p.category)}</span>
+        <span>${p.kind === 'formule' ? '<span class="tag formule">Formule</span> ' : ''}<span class="tag">${h(p.category)}</span></span>
       </div>
       <div class="desc">${h(p.description || '')}</div>
       <div class="row">
@@ -558,7 +562,8 @@ function viewCart() {
         <div class="field">
           <label for="ord-phone">Téléphone</label>
           <input id="ord-phone" name="phone" maxlength="30" required
-                 placeholder="0612345789" inputmode="tel" />
+                 placeholder="0612345789" inputmode="tel"
+                 value="${h((state.user && state.user.phone) || '')}" />
         </div>
         <div class="field">
           <label for="ord-note">Note (optionnel)</label>
@@ -762,6 +767,96 @@ function viewChatThread() {
   </div>`;
 }
 
+/* ---------------- Modale « Gérer le compte » ---------------- */
+
+function accountModalHtml() {
+  const acc = state.account || {
+    email: '', phone: '', identities: [], hasPassword: false,
+  };
+  const canUnlink = (item) =>
+    acc.identities.some((i) => i.provider !== item.provider) ||
+    (item.provider !== 'local' && acc.hasPassword);
+  const oauthButtons = ['github', 'google'].filter(
+    (p) => !acc.identities.some((i) => i.provider === p)
+  );
+  return `
+    <div class="modal" role="dialog" aria-modal="true" aria-label="Gérer le compte">
+      <h3>Gérer le compte</h3>
+      <form id="account-form">
+        <div class="field">
+          <label for="acc-email">Adresse e-mail (optionnel)</label>
+          <input id="acc-email" name="email" type="email" maxlength="180"
+                 placeholder="vous@exemple.com" value="${h(acc.email || '')}" />
+          <span class="field-hint">Laissez vide si vous ne souhaitez pas renseigner d’adresse.</span>
+        </div>
+        <div class="field">
+          <label for="acc-phone">Numéro de téléphone</label>
+          <input id="acc-phone" name="phone" maxlength="30" inputmode="tel"
+                 placeholder="0612345678" value="${h(acc.phone || '')}" />
+          <span class="field-hint">Pré-rempli automatiquement lors de vos commandes.</span>
+        </div>
+        ${state.accountError ? `<div class="error-box">${h(state.accountError)}</div>` : ''}
+        <button class="btn" type="submit" ${state.accountBusy ? 'disabled' : ''}>Enregistrer les informations</button>
+      </form>
+
+      <h4 style="margin:22px 0 10px;font-size:14px">Moyens de connexion</h4>
+      ${acc.identities.length === 0
+        ? `<div style="color:var(--muted);font-size:13px">Chargement…</div>`
+        : acc.identities.map((i) => `
+          <div class="setting-row">
+            <span class="ic">${i.provider === 'github' ? LOGO_GITHUB : i.provider === 'google' ? LOGO_GOOGLE : ''}</span>
+            <div class="info">
+              <div class="t">${h(PROVIDER_LABELS[i.provider] || i.provider)}</div>
+              <div class="s">${i.provider === 'local' ? 'Connexion par nom d’utilisateur et mot de passe' : h(i.email || 'Identité liée')}</div>
+            </div>
+            <button class="btn btn-ghost btn-sm" type="button" data-action="account-unlink" data-provider="${h(i.provider)}"
+                    ${canUnlink(i) ? '' : 'disabled title="Ajoutez un autre moyen de connexion avant de dissocier"'}>Dissocier</button>
+          </div>`).join('')}
+      ${oauthButtons.length ? `
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
+          ${oauthButtons.map((p) => `
+            <button class="btn btn-ghost btn-sm" type="button" data-action="account-link" data-provider="${p}">
+              ${p === 'github' ? LOGO_GITHUB : LOGO_GOOGLE} Lier ${PROVIDER_LABELS[p]}
+            </button>`).join('')}
+        </div>` : `<div style="color:var(--muted);font-size:12.5px;margin-top:10px">GitHub et Google sont tous deux liés à ce compte.</div>`}
+
+      <div class="setting-row" style="margin-top:18px;border-top:1px solid var(--border);padding-top:16px">
+        <span class="ic"></span>
+        <div class="info">
+          <div class="t" style="color:var(--red)">Supprimer mon compte</div>
+          <div class="s">Efface vos commandes, messages et identités. L’argent rapporté dans les finances est conservé.</div>
+        </div>
+        <button class="btn btn-danger btn-sm" type="button" data-action="account-delete">Supprimer</button>
+      </div>
+
+      <div class="actions">
+        <button class="btn btn-ghost" type="button" data-close>Fermer</button>
+      </div>
+    </div>`;
+}
+
+function drawAccountModal() {
+  const backdrop = document.getElementById('account-modal');
+  if (backdrop) backdrop.innerHTML = accountModalHtml();
+}
+
+function openAccountModal() {
+  if (document.getElementById('account-modal')) return;
+  const backdrop = document.createElement('div');
+  backdrop.className = 'modal-backdrop';
+  backdrop.id = 'account-modal';
+  backdrop.innerHTML = accountModalHtml();
+  document.body.appendChild(backdrop);
+  backdrop.addEventListener('click', (e) => {
+    if (e.target === backdrop || e.target.closest('[data-close]')) backdrop.remove();
+  });
+}
+
+function closeAccountModal() {
+  const backdrop = document.getElementById('account-modal');
+  if (backdrop) backdrop.remove();
+}
+
 /* ---------------- Profil ---------------- */
 
 function viewProfile() {
@@ -780,6 +875,18 @@ function viewProfile() {
   </div>
   ${state.error ? `<div class="error-box">${h(state.error)}</div>` : ''}
   ${state.notice ? `<div class="info-box">${h(state.notice)}</div>` : ''}
+
+  <div class="panel">
+    <h3>Mon compte</h3>
+    <div class="setting-row">
+      <span class="ic"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></span>
+      <div class="info">
+        <div class="t">Informations et connexions</div>
+        <div class="s">E-mail, téléphone, moyens de connexion et suppression du compte.</div>
+      </div>
+      <button class="btn btn-ghost btn-sm" type="button" data-action="account-open">Gérer le compte</button>
+    </div>
+  </div>
 
   <div class="panel">
     <h3>Espace fournisseur</h3>
@@ -927,8 +1034,7 @@ function viewAdmin() {
     content = `
       <div class="toolbar">
         <span style="flex:1"></span>
-        <button class="btn btn-ghost btn-sm" data-action="cats-open"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg> Gérer les catégories</button>
-        <button class="btn btn-sm" data-action="product-new">＋ Ajouter un produit</button>
+        <button class="btn btn-sm" data-action="create-open">＋ Créer</button>
       </div>
       ${state.adminProducts.length === 0 ? `
         <div class="empty">
@@ -939,7 +1045,7 @@ function viewAdmin() {
         <div class="product-admin-row">
           <div class="thumb">${p.imageUrl ? `<img src="${h(p.imageUrl)}" alt="" />` : emojiFor(p.category)}</div>
           <div class="info">
-            <div class="nm">${h(p.name)} ${p.available ? '' : '<span class="tag off">Indisponible</span>'}</div>
+            <div class="nm">${h(p.name)} ${p.kind === 'formule' ? '<span class="tag formule">Formule</span>' : ''} ${p.available ? '' : '<span class="tag off">Indisponible</span>'}</div>
             <div class="sub">${euro(p.priceCents)} · ${h(p.category)}</div>
           </div>
           <div class="acts">
@@ -1064,6 +1170,163 @@ function openCategoriesModal() {
 
   backdrop.addEventListener('click', (e) => { if (e.target === backdrop) backdrop.remove(); });
   draw();
+}
+
+/* ---------------- Création unique (produit / formule / catégorie) ---------------- */
+
+function openCreateModal() {
+  const backdrop = document.createElement('div');
+  backdrop.className = 'modal-backdrop';
+  const choices = [
+    ['product', ICONS.box, 'Produit', 'Un article simple, vendu à l’unité.'],
+    ['formule', ICONS.tag || ICONS.box, 'Formule', 'Un ensemble de plusieurs produits vendus ensemble.'],
+    ['category', ICONS.tag || ICONS.box, 'Catégorie', 'Un nouveau rayon pour organiser le catalogue.'],
+  ];
+  backdrop.innerHTML = `
+    <div class="modal" role="dialog" aria-modal="true">
+      <h3>Que voulez-vous créer ?</h3>
+      <div class="cat-list">
+        ${choices.map(([kind, icon, title, desc]) => `
+          <button type="button" class="cat-row create-choice" data-kind="${kind}" style="text-align:left;cursor:pointer">
+            <span class="ic">${icon}</span>
+            <span class="nm">${title}<span class="field-hint">${desc}</span></span>
+          </button>`).join('')}
+      </div>
+      <div class="actions">
+        <button class="btn btn-ghost" type="button" data-close>Annuler</button>
+      </div>
+    </div>`;
+  document.body.appendChild(backdrop);
+  const close = () => backdrop.remove();
+  backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); });
+  $('[data-close]', backdrop).addEventListener('click', close);
+  $$('[data-kind]', backdrop).forEach((btn) => btn.addEventListener('click', () => {
+    const kind = btn.dataset.kind;
+    close();
+    if (kind === 'product') openProductModal(null);
+    else if (kind === 'formule') openFormuleModal(null);
+    else openCategoriesModal();
+  }));
+}
+
+/* ---------------- Modale formule ---------------- */
+
+function openFormuleModal(formule) {
+  const f = formule || {
+    name: '', description: '', priceCents: 0, category: 'Formules',
+    imageUrl: '', available: true, items: [],
+  };
+  const catNames = [...new Set(['Formules', ...categoryNames(), f.category])].filter(Boolean);
+  const selected = new Map((f.items || []).map((i) => [i.productId, i.qty]));
+  const products = state.adminProducts.filter((p) => p.kind !== 'formule');
+  const backdrop = document.createElement('div');
+  backdrop.className = 'modal-backdrop';
+  backdrop.innerHTML = `
+    <div class="modal" role="dialog" aria-modal="true">
+      <h3>${formule ? 'Modifier la formule' : 'Ajouter une formule'}</h3>
+      <form id="formule-form">
+        <div class="field">
+          <label for="f-name">Nom de la formule</label>
+          <input id="f-name" name="name" maxlength="120" required value="${h(f.name)}" />
+        </div>
+        <div class="field">
+          <label for="f-desc">Description</label>
+          <textarea id="f-desc" name="description" maxlength="2000">${h(f.description || '')}</textarea>
+        </div>
+        <div class="field">
+          <label>Produits inclus <span class="field-hint">Cochez et indiquez la quantité. Le prix de revient est calculé automatiquement.</span></label>
+          ${products.length === 0
+            ? `<div class="error-box">Créez d’abord au moins un produit avant de composer une formule.</div>`
+            : `<div class="cat-list">${products.map((p) => `
+              <label class="cat-row" style="cursor:pointer">
+                <input type="checkbox" data-item-id="${p.id}" ${selected.has(p.id) ? 'checked' : ''} style="width:auto" />
+                <span class="nm">${h(p.name)}</span>
+                <span class="cnt">${euro(p.priceCents)}</span>
+                <input type="number" data-item-qty="${p.id}" min="1" max="99"
+                       value="${selected.get(p.id) || 1}" aria-label="Quantité pour ${h(p.name)}"
+                       style="width:64px;padding:6px 8px" />
+              </label>`).join('')}</div>`}
+        </div>
+        <div class="field">
+          <label for="f-price">Prix de vente de la formule (€)</label>
+          <input id="f-price" name="price" type="number" min="0" step="0.01" required
+                 value="${(f.priceCents / 100).toFixed(2)}" />
+        </div>
+        <div class="field">
+          <label for="f-cat">Catégorie</label>
+          <select id="f-cat" name="category">
+            ${catNames.map((c) => `<option value="${h(c)}" ${c === f.category ? 'selected' : ''}>${emojiFor(c)} ${h(c)}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field">
+          <label for="f-image">Photo (JPEG, PNG, WebP — 5 Mo max)</label>
+          <input id="f-image" name="image" type="file" accept="image/*" />
+          ${f.imageUrl ? `<span class="field-hint">Image actuelle conservée si aucun nouveau fichier.</span>` : ''}
+        </div>
+        <div class="field">
+          <label style="display:flex;align-items:center;gap:9px;cursor:pointer">
+            <input type="checkbox" name="available" ${f.available ? 'checked' : ''} style="width:auto" />
+            Disponible à la vente
+          </label>
+        </div>
+        <div class="actions">
+          <button class="btn btn-ghost" type="button" data-close>Annuler</button>
+          <button class="btn" type="submit">${formule ? 'Enregistrer' : 'Créer la formule'}</button>
+        </div>
+      </form>
+    </div>`;
+  document.body.appendChild(backdrop);
+  const close = () => backdrop.remove();
+  backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); });
+  $('[data-close]', backdrop).addEventListener('click', close);
+
+  $('#formule-form', backdrop).addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const btn = $('button[type="submit"]', backdrop);
+    btn.disabled = true;
+    try {
+      const items = $$('[data-item-id]', backdrop)
+        .filter((el) => el.checked)
+        .map((el) => {
+          const qtyEl = $(`[data-item-qty="${el.dataset.itemId}"]`, backdrop);
+          const qty = Math.max(1, Math.min(99, Number(qtyEl && qtyEl.value) || 1));
+          return { productId: Number(el.dataset.itemId), qty };
+        });
+      if (!items.length) throw new Error('Sélectionnez au moins un produit pour la formule.');
+
+      let imageUrl = f.imageUrl || '';
+      const file = fd.get('image');
+      if (file && file.size > 0) {
+        const upForm = new FormData();
+        upForm.append('image', file);
+        const up = await api('/uploads/product-image', { method: 'POST', form: upForm });
+        imageUrl = up.url;
+      }
+      const body = {
+        name: String(fd.get('name') || '').trim(),
+        description: String(fd.get('description') || '').trim(),
+        priceCents: Math.round(Number(fd.get('price')) * 100),
+        category: String(fd.get('category') || ''),
+        imageUrl,
+        available: fd.get('available') === 'on',
+        items,
+      };
+      if (formule) {
+        await api('/formules/' + formule.id, { method: 'PATCH', body });
+        toast('Formule mise à jour', 'ok');
+      } else {
+        await api('/formules', { method: 'POST', body });
+        toast('Formule ajoutée', 'ok');
+      }
+      close();
+      await loadAdminProducts();
+      render();
+    } catch (err) {
+      btn.disabled = false;
+      toast(err.message || 'Erreur', 'err');
+    }
+  });
 }
 
 /* ---------------- Espace Finances ---------------- */
@@ -1380,6 +1643,15 @@ async function loadCategories() {
   } catch (err) { /* silencieux : repli sur la liste par défaut */ }
 }
 
+async function loadAccount() {
+  try {
+    state.account = await api('/account');
+    state.accountError = null;
+  } catch (err) {
+    if (!(err instanceof ApiError && err.status === 401)) state.accountError = err.message;
+  }
+}
+
 /** Espace Finances : résumé + journal des ventes + détail par produit + dépenses. */
 async function loadFinances() {
   const qs = new URLSearchParams();
@@ -1514,8 +1786,10 @@ async function go(view, param) {
 
   if (view === 'gallery') {
     await loadProducts();
-  } else if (view === 'cart' || view === 'profile') {
+  } else if (view === 'cart') {
     /* rendu immédiat */
+  } else if (view === 'profile') {
+    await loadAccount();
   } else if (view === 'orders') {
     await loadOrders();
   } else if (view === 'orderDetail') {
@@ -1634,8 +1908,8 @@ document.addEventListener('click', async (e) => {
     } else if (action === 'atab') {
       state.adminTab = el.dataset.t;
       render();
-    } else if (action === 'cats-open') {
-      openCategoriesModal();
+    } else if (action === 'create-open') {
+      openCreateModal();
     } else if (action === 'fin-apply') {
       const fromEl = $('#fin-from');
       const toEl = $('#fin-to');
@@ -1681,18 +1955,44 @@ document.addEventListener('click', async (e) => {
       render();
       toast('Statut mis à jour : ' + (STATUS[el.dataset.status] || el.dataset.status), 'ok');
     } else if (action === 'product-new') {
-      openProductModal(null);
+      openCreateModal();
     } else if (action === 'product-edit') {
       const p = state.adminProducts.find((x) => x.id === id);
-      if (p) openProductModal(p);
+      if (p) {
+        if (p.kind === 'formule') openFormuleModal(p);
+        else openProductModal(p);
+      }
     } else if (action === 'product-del') {
       const p = state.adminProducts.find((x) => x.id === id);
       if (p && confirm(`Supprimer « ${p.name} » ?`)) {
-        await api('/products/' + id, { method: 'DELETE' });
+        const path = p.kind === 'formule' ? '/formules/' : '/products/';
+        await api(path + id, { method: 'DELETE' });
         await loadAdminProducts();
         render();
-        toast('Produit supprimé', 'ok');
+        toast((p.kind === 'formule' ? 'Formule' : 'Produit') + ' supprimé', 'ok');
       }
+    } else if (action === 'account-open') {
+      await loadAccount();
+      openAccountModal();
+    } else if (action === 'account-link') {
+      const provider = el.dataset.provider;
+      const data = await api('/account/link', { method: 'POST', body: { provider, target: 'web' } });
+      window.location.href = data.url;
+    } else if (action === 'account-unlink') {
+      const provider = el.dataset.provider;
+      if (!confirm(`Dissocier ${PROVIDER_LABELS[provider] || provider} de votre compte ?`)) return;
+      state.account = await api('/account/unlink/' + encodeURIComponent(provider), { method: 'DELETE' });
+      state.accountError = null;
+      state.user = await api('/auth/me');
+      render();
+      drawAccountModal();
+      toast('Identité dissociée', 'ok');
+    } else if (action === 'account-delete') {
+      if (!confirm('SUPPRIMER DÉFINITIVEMENT votre compte ?Vos commandes, messages et identités seront effacés. L’argent rapporté dans les finances sera conservé.')) return;
+      await api('/account', { method: 'DELETE' });
+      closeAccountModal();
+      toast('Compte supprimé', 'ok');
+      logout(false);
     } else if (action === 'leave-role') {
       await api('/admin/logout-role', { method: 'POST' });
       state.user = await api('/auth/me');
@@ -1890,6 +2190,34 @@ document.addEventListener('submit', async (e) => {
     return;
   }
 
+  if (e.target.id === 'account-form') {
+    const fd = new FormData(e.target);
+    const btn = $('button[type="submit"]', e.target);
+    state.accountBusy = true;
+    state.accountError = null;
+    if (btn) btn.disabled = true;
+    try {
+      state.account = await api('/account', {
+        method: 'PATCH',
+        body: {
+          email: String(fd.get('email') || '').trim(),
+          phone: String(fd.get('phone') || '').trim(),
+        },
+      });
+      state.user = await api('/auth/me');
+      state.accountBusy = false;
+      toast('Informations du compte enregistrées', 'ok');
+      render();
+      drawAccountModal();
+    } catch (err) {
+      state.accountBusy = false;
+      state.accountError = err.message;
+      render();
+      drawAccountModal();
+    }
+    return;
+  }
+
   if (e.target.id === 'supplier-form') {
     const code = String(new FormData(e.target).get('code') || '').trim();
     try {
@@ -1928,12 +2256,15 @@ async function bootAfterLogin() {
 }
 
 async function init() {
-  // retour OAuth web : /?token=…&role=…
+  // retour OAuth web : /?token=…&role=… ou /?linked=github après liaison
   const params = new URLSearchParams(location.search);
+  const linkedProvider = params.get('linked');
   const urlError = loginErrorFromUrl();
   if (urlError) state.loginError = urlError;
   if (params.get('token')) {
     saveSession(params.get('token'), null);
+    history.replaceState({}, '', location.pathname);
+  } else if (linkedProvider) {
     history.replaceState({}, '', location.pathname);
   }
   if (state.loginError && !state.token) {
@@ -1946,6 +2277,9 @@ async function init() {
   }
   try {
     await bootAfterLogin();
+    if (linkedProvider) {
+      toast(`Compte ${PROVIDER_LABELS[linkedProvider] || linkedProvider} lié avec succès.`, 'ok');
+    }
   } catch {
     localStorage.removeItem('stb_token');
     state.token = '';
