@@ -23,3 +23,6 @@ windows/dist/
 # signature release (clé privée : jamais sur GitHub)
 android/keystore/
 android/keystore.properties
+
+# suivi d'avancement : fichier local uniquement (pas sur GitHub)
+README.md
