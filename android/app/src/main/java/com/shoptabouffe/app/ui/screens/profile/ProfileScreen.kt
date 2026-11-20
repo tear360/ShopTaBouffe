@@ -26,7 +26,6 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.BugReport
-import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.Logout
 import androidx.compose.material.icons.outlined.Notifications
@@ -326,12 +325,6 @@ fun ProfileScreen(user: User, vm: MainViewModel) {
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         Column(modifier = Modifier.padding(16.dp)) {
-                            InfoLine(
-                                icon = { Icon(Icons.Outlined.Cloud, null, tint = MaterialTheme.colorScheme.primary) },
-                                label = "Serveur",
-                                value = Config.HOST,
-                            )
-                            Spacer(Modifier.height(12.dp))
                             InfoLine(
                                 icon = { Icon(Icons.Outlined.Code, null, tint = MaterialTheme.colorScheme.primary) },
                                 label = "Temps réel",

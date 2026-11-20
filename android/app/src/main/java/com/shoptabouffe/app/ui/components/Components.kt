@@ -228,7 +228,12 @@ fun ErrorState(message: String, onRetry: (() -> Unit)? = null) {
     ) {
         Icon(Icons.Outlined.ErrorOutline, contentDescription = null, tint = Red, modifier = Modifier.size(44.dp))
         Spacer(Modifier.height(12.dp))
-        Text(message, style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center)
+        Text(
+            message,
+            style = MaterialTheme.typography.bodyMedium,
+            color = Color.White,
+            textAlign = TextAlign.Center,
+        )
         if (onRetry != null) {
             Spacer(Modifier.height(16.dp))
             OutlinedButton(onClick = onRetry) {

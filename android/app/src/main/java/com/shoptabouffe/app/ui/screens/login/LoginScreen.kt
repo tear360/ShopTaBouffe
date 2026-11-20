@@ -316,13 +316,6 @@ fun LoginScreen(vm: MainViewModel) {
             Spacer(Modifier.height(14.dp))
         }
 
-        Spacer(Modifier.height(14.dp))
-        Text(
-            "Serveur : ${Config.HOST}",
-            style = MaterialTheme.typography.labelSmall,
-            color = TextMuted.copy(alpha = 0.75f),
-            textAlign = TextAlign.Center,
-        )
         Spacer(Modifier.height(32.dp))
     }
 

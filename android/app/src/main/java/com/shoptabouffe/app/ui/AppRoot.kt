@@ -30,7 +30,6 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.shoptabouffe.app.MainViewModel
-import com.shoptabouffe.app.core.Config
 import com.shoptabouffe.app.core.Updater
 import com.shoptabouffe.app.core.models.User
 import com.shoptabouffe.app.ui.components.ErrorState
@@ -60,12 +59,6 @@ fun AppRoot(vm: MainViewModel) {
                 verticalArrangement = Arrangement.Center,
             ) {
                 ErrorState(message = s.message, onRetry = vm::resolveSession)
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    "Serveur : ${Config.HOST}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
             }
 
             is MainViewModel.AuthState.LoggedIn -> MainScaffold(user = s.user, vm = vm)

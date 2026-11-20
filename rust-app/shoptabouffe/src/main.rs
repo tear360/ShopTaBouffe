@@ -12,7 +12,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 const API_BASE: &str = "https://chorizo.dpdns.org/api";
-const APP_VERSION: &str = "1.0.12";
+const APP_VERSION: &str = "1.0.13";
 
 /* ------------------------------------------------------- palette (Theme.kt) */
 
@@ -3053,19 +3053,6 @@ impl ShopApp {
                             |ui| {
                                 ui.label(
                                     egui::RichText::new(format!("v{}", APP_VERSION))
-                                        .color(TEXT)
-                                        .size(12.0),
-                                );
-                            },
-                        );
-                    });
-                    ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new("Serveur").color(MUTED).size(12.0));
-                        ui.with_layout(
-                            egui::Layout::right_to_left(egui::Align::Center),
-                            |ui| {
-                                ui.label(
-                                    egui::RichText::new("chorizo.dpdns.org")
                                         .color(TEXT)
                                         .size(12.0),
                                 );
