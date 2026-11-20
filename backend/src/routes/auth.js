@@ -232,29 +232,16 @@ router.post('/upgrade', requireAuth, (req, res) => {
   return res.json({ token: signToken(user), user: toUser(user) });
 });
 
-/** POST /api/auth/demo body { name } */
-router.post('/demo', (req, res) => {
-  if (String(process.env.ALLOW_DEMO_LOGIN ?? 'true').toLowerCase() === 'false') {
-    return res.status(403).json({ error: 'Login démo désactivé' });
-  }
-  const name = req.body && typeof req.body.name === 'string' ? req.body.name.trim() : '';
-  if (name.length < 1 || name.length > 80) {
-    return res.status(400).json({ error: 'name requis (1 à 80 caractères)' });
-  }
-  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'user';
-  const providerId = `demo:${slug}`;
-  let user = db
-    .prepare("SELECT * FROM users WHERE provider = 'demo' AND provider_id = ?")
-    .get(providerId);
-  if (!user) {
-    const info = db
-      .prepare(
-        "INSERT INTO users (provider, provider_id, name, email, avatar_url, role, created_at) VALUES ('demo', ?, ?, NULL, NULL, 'customer', ?)"
-      )
-      .run(providerId, name, nowIso());
-    user = db.prepare('SELECT * FROM users WHERE id = ?').get(info.lastInsertRowid);
-  }
-  return res.json({ token: signToken(user), user: toUser(user) });
+/**
+ * Connexion par nom SUPPRIMÉE : aucun nouveau compte invité n'est créé.
+ * Les comptes `demo` existants ne sont PAS supprimés : leur token reste valide
+ * et POST /auth/upgrade leur permet de finaliser leur compte en conservant
+ * leur id (donc toutes leurs données).
+ */
+router.post('/demo', (_req, res) => {
+  return res.status(410).json({
+    error: 'La connexion par nom n’est plus disponible. Finalisez votre compte en cours avec un nom d’utilisateur et un mot de passe.',
+  });
 });
 
 /** GET /api/auth/me → User */

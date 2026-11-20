@@ -215,6 +215,15 @@ function saveSession(token, user) {
 }
 
 function logout(callApi) {
+  // Un ancien compte invité ne peut pas se déconnecter avant d'avoir choisi
+  // ses identifiants : il perdrait sinon la possibilité de se reconnecter.
+  if (state.user && state.user.provider === 'demo') {
+    state.upgradeModal = true;
+    state.upgradeName = state.user.name || '';
+    state.upgradeError = 'Finalisez votre compte avant de vous déconnecter.';
+    render();
+    return;
+  }
   if (callApi !== false && state.token) {
     // best effort : on vide la session quand même
     fetch('/api/auth/logout', { method: 'POST', headers: { Authorization: 'Bearer ' + state.token } }).catch(() => {});
@@ -260,7 +269,6 @@ function viewLogin() {
   const err = state.error || state.loginError;
   const isLogin = state.loginMode === 'login';
   const isRegister = state.loginMode === 'register';
-  const isDemo = state.loginMode === 'demo';
   return `
   <div class="login-wrap">
     <div class="login-card">
@@ -270,7 +278,6 @@ function viewLogin() {
       <div class="auth-tabs">
         <button class="btn btn-ghost btn-sm ${isLogin ? 'active' : ''}" data-action="auth-mode" data-mode="login">Se connecter</button>
         <button class="btn btn-ghost btn-sm ${isRegister ? 'active' : ''}" data-action="auth-mode" data-mode="register">S'inscrire</button>
-        <button class="btn btn-ghost btn-sm ${isDemo ? 'active' : ''}" data-action="auth-mode" data-mode="demo">Connexion par nom</button>
       </div>
       ${isLogin ? `
       <form id="login-form">
@@ -309,17 +316,6 @@ function viewLogin() {
           ${state.regBusy ? 'Création…' : 'Créer mon compte'}
         </button>
       </form>` : ''}
-      ${isDemo ? `
-      <form id="demo-form">
-        <div class="field">
-          <label for="login-name">Votre nom</label>
-          <input id="login-name" name="name" maxlength="80" autocomplete="nickname"
-                 placeholder="Ex. : Léa" value="${h(state.loginName)}" required />
-        </div>
-        <button class="btn" type="submit" ${state.loggingIn ? 'disabled' : ''}>
-          ${state.loggingIn ? 'Connexion…' : 'Se connecter avec ce nom'}
-        </button>
-      </form>` : ''}
       ${isLogin || isRegister ? `
       <div class="divider">ou continuer avec</div>
       <a class="btn btn-provider google" href="/api/auth/start?provider=google&target=web">${LOGO_GOOGLE} Continuer avec Google</a>
@@ -330,31 +326,37 @@ function viewLogin() {
 
 function viewUpgradeModal() {
   const err = state.upgradeError;
+  const name = state.upgradeName || '';
   return `
-  <div class="modal-backdrop" id="upgrade-backdrop">
+  <div class="modal-backdrop modal-mandatory" id="upgrade-backdrop">
     <div class="modal">
-      <h3>Créer un compte</h3>
+      <h3>Finalisez votre compte</h3>
       <p style="color:var(--muted);font-size:13.5px;margin:0 0 14px">
-        Vous êtes connecté en tant qu'invité. Créez un compte pour centraliser vos commandes — vos données précédentes sont conservées.
+        Votre commande et vos données sont conservées. Choisissez simplement un
+        <strong>nom d'utilisateur</strong> et un <strong>mot de passe</strong> pour garder
+        accès à votre compte. Votre nom est déjà renseigné.
       </p>
       ${err ? `<div class="login-error">${h(err)}</div>` : ''}
       <form id="upgrade-form">
         <div class="field">
           <label for="up-name">Votre nom</label>
-          <input id="up-name" name="name" maxlength="80" value="${h(state.upgradeName)}" required />
+          <input id="up-name" name="name" maxlength="80" value="${h(name)}"
+                 ${name ? 'readonly' : ''} autocomplete="name" required />
+          ${name ? '<small class="field-hint">Repris de votre compte invité — conservé tel quel.</small>' : ''}
         </div>
         <div class="field">
           <label for="up-username">Nom d'utilisateur</label>
-          <input id="up-username" name="username" maxlength="32" value="${h(state.upgradeUsername)}" required />
+          <input id="up-username" name="username" maxlength="32" autocomplete="username"
+                 placeholder="Ex. : lea (3 caractères minimum)" value="${h(state.upgradeUsername)}" required />
         </div>
         <div class="field">
           <label for="up-password">Mot de passe</label>
-          <input id="up-password" name="password" type="password" maxlength="128" placeholder="6 caractères minimum" value="${h(state.upgradePassword)}" required />
+          <input id="up-password" name="password" type="password" maxlength="128" autocomplete="new-password"
+                 minlength="6" placeholder="6 caractères minimum" value="${h(state.upgradePassword)}" required />
         </div>
         <div class="actions">
-          <button class="btn btn-ghost" type="button" data-action="upgrade-skip">Plus tard</button>
           <button class="btn" type="submit" ${state.upgradeBusy ? 'disabled' : ''}>
-            ${state.upgradeBusy ? 'Création…' : 'Créer mon compte'}
+            ${state.upgradeBusy ? 'Enregistrement…' : 'Enregistrer mon compte'}
           </button>
         </div>
       </form>
@@ -1600,6 +1602,14 @@ document.addEventListener('click', async (e) => {
   const action = el.dataset.action;
   const id = Number(el.dataset.id);
 
+  // Finalisation de compte obligatoire : aucune autre action n'est autorisée.
+  if (state.upgradeModal) {
+    e.preventDefault();
+    state.upgradeError = 'Enregistrez d’abord votre nom d’utilisateur et votre mot de passe.';
+    render();
+    return;
+  }
+
   try {
     if (action === 'go') {
       e.preventDefault();
@@ -1608,9 +1618,6 @@ document.addEventListener('click', async (e) => {
       state.loginMode = el.dataset.mode;
       state.loginError = null;
       state.error = null;
-      render();
-    } else if (action === 'upgrade-skip') {
-      state.upgradeModal = false;
       render();
     } else if (action === 'refresh') {
       await refresh();
@@ -1737,6 +1744,12 @@ document.addEventListener('change', async (e) => {
 document.addEventListener('submit', async (e) => {
   e.preventDefault();
 
+  if (state.upgradeModal && e.target.id !== 'upgrade-form') {
+    state.upgradeError = 'Enregistrez d’abord votre nom d’utilisateur et votre mot de passe.';
+    render();
+    return;
+  }
+
   if (e.target.id === 'login-form') {
     const username = String(new FormData(e.target).get('username') || '').trim();
     const password = String(new FormData(e.target).get('password') || '');
@@ -1779,32 +1792,6 @@ document.addEventListener('submit', async (e) => {
       state.regBusy = false;
       state.regError = err.message;
       state.error = err.message;
-      render();
-    }
-    return;
-  }
-
-  if (e.target.id === 'demo-form') {
-    const name = String(new FormData(e.target).get('name') || '').trim();
-    if (!name) return;
-    state.loggingIn = true;
-    state.loginName = name;
-    state.loginError = null;
-    render();
-    try {
-      const data = await api('/auth/demo', { method: 'POST', body: { name }, noLogout: true });
-      saveSession(data.token, data.user);
-      state.loggingIn = false;
-      // Compte démo → proposer la création de compte (garde les données)
-      state.upgradeModal = true;
-      state.upgradeName = data.user.name || name;
-      state.upgradeUsername = '';
-      state.upgradePassword = '';
-      state.upgradeError = null;
-      await bootAfterLogin();
-    } catch (err) {
-      state.loggingIn = false;
-      state.loginError = err.message;
       render();
     }
     return;
@@ -1922,6 +1909,17 @@ document.addEventListener('submit', async (e) => {
 async function bootAfterLogin() {
   // reprendre la session existante
   state.user = await api('/auth/me', { noLogout: true });
+
+  // Anciens comptes "par nom" : on ne les supprime pas, on leur impose la
+  // finalisation du compte (nom repris tel quel, username + mot de passe à choisir).
+  if (state.user && state.user.provider === 'demo') {
+    state.upgradeModal = true;
+    state.upgradeName = state.user.name || '';
+    state.upgradeUsername = '';
+    state.upgradePassword = '';
+    state.upgradeError = null;
+  }
+
   connectSocket();
   await loadCategories();
   if (isSupplier()) await loadAdminConversations();

@@ -72,8 +72,8 @@ private fun brandOf(provider: String): Brand = when (provider) {
     else -> Brand(Color.White, Color(0xFF1F1A17), Icons.Filled.Language, Color(0xFF4285F4))
 }
 
-/** 0 = Se connecter, 1 = S'inscrire, 2 = Connexion par nom. */
-private val TAB_LABELS = listOf("Se connecter", "S'inscrire", "Connexion par nom")
+/** 0 = Se connecter, 1 = S'inscrire. La connexion par nom a été supprimée. */
+private val TAB_LABELS = listOf("Se connecter", "S'inscrire")
 
 @Composable
 fun LoginScreen(vm: MainViewModel) {
@@ -166,38 +166,6 @@ fun LoginScreen(vm: MainViewModel) {
         Spacer(Modifier.height(18.dp))
 
         when (mode) {
-            // ---------------- Connexion par nom (invité) ----------------
-            2 -> {
-                OutlinedTextField(
-                    value = name,
-                    onValueChange = { name = it.take(40) },
-                    label = { Text("Votre nom") },
-                    placeholder = { Text("Ex. Léa") },
-                    singleLine = true,
-                    shape = RoundedCornerShape(14.dp),
-                    keyboardOptions = KeyboardOptions(
-                        capitalization = KeyboardCapitalization.Words,
-                        imeAction = ImeAction.Done,
-                    ),
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Spacer(Modifier.height(12.dp))
-                PrimaryButton(
-                    text = "Se connecter avec ce nom",
-                    onClick = { vm.demoLogin(name) },
-                    enabled = !busy && name.isNotBlank(),
-                    loading = busy,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Spacer(Modifier.height(10.dp))
-                Text(
-                    "Compte invité : vos commandes sont conservées si vous créez un compte ensuite.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = TextMuted,
-                    textAlign = TextAlign.Center,
-                )
-            }
-
             // ---------------- Inscription ----------------
             1 -> {
                 OutlinedTextField(

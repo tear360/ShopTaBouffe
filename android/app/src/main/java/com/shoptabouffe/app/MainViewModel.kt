@@ -16,7 +16,6 @@ import com.shoptabouffe.app.core.Session
 import com.shoptabouffe.app.core.SocketManager
 import com.shoptabouffe.app.core.Updater
 import com.shoptabouffe.app.core.models.CredentialsBody
-import com.shoptabouffe.app.core.models.NameBody
 import com.shoptabouffe.app.core.models.RegisterBody
 import com.shoptabouffe.app.core.models.User
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -42,9 +41,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val _busy = MutableStateFlow(false)
     val busy: StateFlow<Boolean> = _busy.asStateFlow()
 
-    /** Message destiné à l'écran de connexion (erreur OAuth, démo…). */
+    /** Message destiné à l'écran de connexion (erreur OAuth…). */
     private val _loginNotice = MutableStateFlow<String?>(null)
     val loginNotice: StateFlow<String?> = _loginNotice.asStateFlow()
+
+    /**
+     * Ancien compte « par nom » encore connecté : on ne le supprime pas, on
+     * affiche un écran obligatoire de finalisation (username + mot de passe).
+     * Le nom du compte est repris tel quel par l'UI.
+     */
+    private val _needsUpgrade = MutableStateFlow<User?>(null)
+    val needsUpgrade: StateFlow<User?> = _needsUpgrade.asStateFlow()
 
     /* ------------------------------------------------------- mise à jour */
 
@@ -76,6 +83,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun resolveSession() {
         val token = session.token
         if (token == null) {
+            _needsUpgrade.value = null
             _auth.value = AuthState.LoggedOut
             return
         }
@@ -84,6 +92,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             when (val result = Api.call { Api.service.me() }) {
                 is ApiResult.Success -> {
                     session.setUser(result.data)
+                    _needsUpgrade.value =
+                        if (result.data.provider == "demo") result.data else null
                     _auth.value = AuthState.LoggedIn(result.data)
                     SocketManager.connect()
                     if (result.data.isSupplier) SocketManager.watchOrders()
@@ -93,6 +103,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     if (result.code == 401) {
                         session.logout()
                         SocketManager.disconnect()
+                        _needsUpgrade.value = null
                         _auth.value = AuthState.LoggedOut
                         _loginNotice.value = "Votre session a expiré, reconnectez-vous."
                     } else {
@@ -154,29 +165,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             }.onFailure {
                 _loginNotice.value = "Impossible d'ouvrir le navigateur."
             }
-        }
-    }
-
-    fun demoLogin(rawName: String) {
-        val name = rawName.trim().ifBlank { "Client ${('A'..'Z').random()}" }
-        _loginNotice.value = null
-        _busy.value = true
-        viewModelScope.launch {
-            when (val result = Api.call { Api.service.demoLogin(NameBody(name)) }) {
-                is ApiResult.Success -> {
-                    result.data.token?.let { token ->
-                        SocketManager.disconnect()
-                        session.saveToken(token)
-                        _auth.value = AuthState.Loading
-                        resolveSession()
-                    } ?: run {
-                        _loginNotice.value = "Le serveur n'a pas renvoyé de jeton."
-                    }
-                }
-
-                is ApiResult.Failure -> _loginNotice.value = result.message
-            }
-            _busy.value = false
         }
     }
 
@@ -355,9 +343,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun logout() {
+        // Un ancien compte invité ne doit pas pouvoir se déconnecter avant
+        // d'avoir choisi ses identifiants : il ne pourrait plus se reconnecter.
+        if (_needsUpgrade.value != null) {
+            _updateNotice.value = "Finalisez votre compte avant de vous déconnecter."
+            return
+        }
         SocketManager.disconnect()
         session.logout()
         Cart.clear()
+        _needsUpgrade.value = null
         _loginNotice.value = null
         _auth.value = AuthState.LoggedOut
     }

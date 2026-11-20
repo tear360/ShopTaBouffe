@@ -181,8 +181,6 @@ data class StatusBody(val status: String)
 
 data class CodeBody(val code: String)
 
-data class NameBody(val name: String)
-
 /** Connexion par nom d'utilisateur + mot de passe. */
 data class CredentialsBody(val username: String, val password: String)
 

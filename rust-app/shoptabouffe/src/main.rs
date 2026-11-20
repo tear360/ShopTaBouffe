@@ -12,7 +12,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 const API_BASE: &str = "https://chorizo.dpdns.org/api";
-const APP_VERSION: &str = "1.0.9";
+const APP_VERSION: &str = "1.0.10";
 
 /* ------------------------------------------------------- palette (Theme.kt) */
 
@@ -223,9 +223,8 @@ struct ShopApp {
     screen: Screen,
     token: Option<String>,
     user: Option<User>,
-    name_input: String,
     busy: bool,
-    // Système de compte : 0 connexion, 1 inscription, 2 connexion par nom
+    // Système de compte : 0 connexion, 1 inscription (connexion par nom supprimée)
     login_tab: usize,
     login_username: String,
     login_password: String,
@@ -356,11 +355,18 @@ impl Default for ShopApp {
             }
         });
 
+        // Reprend la session en cours (anciens comptes invités inclus).
+        if let Ok(token) = std::fs::read_to_string(session_file()) {
+            let token = token.trim().to_string();
+            if !token.is_empty() {
+                restore_session(tx.clone(), token);
+            }
+        }
+
         Self {
             screen: Screen::Login,
             token: None,
             user: None,
-            name_input: String::new(),
             busy: false,
             login_tab: 0,
             login_username: String::new(),
@@ -656,28 +662,42 @@ fn send_message(tx: Sender<Msg>, token: String, conv_id: i64, body: String) {
     });
 }
 
-fn demo_login(tx: Sender<Msg>, name: String) {
+/// Session persistée : indispensable pour les anciens comptes « par nom ».
+/// La connexion par nom a été supprimée, mais un compte déjà connecté doit
+/// pouvoir rouvrir l'app et finaliser son compte (sans être supprimé).
+fn session_file() -> std::path::PathBuf {
+    let base = std::env::var("LOCALAPPDATA")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| std::env::temp_dir());
+    base.join("ShopTaBouffe").join("session.txt")
+}
+
+fn save_session(token: &str) {
+    let path = session_file();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::write(path, token);
+}
+
+fn clear_session() {
+    let _ = std::fs::remove_file(session_file());
+}
+
+/// Reprend un token valide au démarrage (y compris un ancien compte démo).
+fn restore_session(tx: Sender<Msg>, token: String) {
     thread::spawn(move || {
-        #[derive(Deserialize)]
-        struct R {
-            token: String,
-            user: User,
-        }
         match http_call(
-            reqwest::Method::POST,
-            format!("{}/auth/demo", API_BASE),
+            reqwest::Method::GET,
+            format!("{}/auth/me", API_BASE),
+            Some(token.clone()),
             None,
-            Some(serde_json::json!({ "name": name })),
             None,
         ) {
-            Ok(t) => parse_ok(&tx, t, |v: R| {
-                let _ = tx.send(Msg::LoginOk(v.user, v.token));
+            Ok(t) => parse_ok(&tx, t, |u: User| {
+                let _ = tx.send(Msg::LoginOk(u, token));
             }),
-            Err(e) => {
-                let _ = match e {
-                    (_, m) => tx.send(Msg::LoginErr(m)),
-                };
-            }
+            Err(_) => clear_session(),
         }
     });
 }
@@ -1459,6 +1479,11 @@ impl ShopApp {
     }
 
     fn logout(&mut self) {
+        if self.upgrade_modal {
+            self.set_notice("Finalisez votre compte avant de vous déconnecter.");
+            return;
+        }
+        clear_session();
         self.user = None;
         self.token = None;
         self.conversations.clear();
@@ -1472,7 +1497,6 @@ impl ShopApp {
         self.cart.clear();
         self.admin_tab = 0;
         self.expanded_order = None;
-        self.name_input.clear();
         self.login_tab = 0;
         self.login_username.clear();
         self.login_password.clear();
@@ -1604,9 +1628,9 @@ impl ShopApp {
             ui.add_space(28.0);
 
             card(ui, |ui| {
-                // --- Onglets : Se connecter / S'inscrire / Connexion par nom ---
+                // --- Onglets : Se connecter / S'inscrire (connexion par nom supprimée) ---
                 ui.horizontal(|ui| {
-                    let tabs = ["Se connecter", "S'inscrire", "Connexion par nom"];
+                    let tabs = ["Se connecter", "S'inscrire"];
                     for (i, label) in tabs.iter().enumerate() {
                         let active = self.login_tab == i;
                         let color = if active { ORANGE } else { MUTED };
@@ -1632,33 +1656,6 @@ impl ShopApp {
                 let busy = self.busy;
 
                 match self.login_tab {
-                    // ---------------- Connexion par nom (démo) ----------------
-                    2 => {
-                        ui.label(egui::RichText::new("Votre nom").strong().color(TEXT));
-                        ui.add_space(4.0);
-                        ui.add(
-                            egui::TextEdit::singleline(&mut self.name_input)
-                                .desired_width(f32::INFINITY)
-                                .hint_text("Ex. : Karim")
-                                .margin(egui::Margin::same(10)),
-                        );
-                        ui.add_space(12.0);
-                        let empty = self.name_input.trim().is_empty();
-                        ui.add_enabled_ui(!busy && !empty, |ui| {
-                            let label = if busy { "Connexion..." } else { "Se connecter avec ce nom" };
-                            if btn_primary(ui, label).clicked() {
-                                self.busy = true;
-                                let name = self.name_input.trim().to_string();
-                                demo_login(self.tx.clone(), name);
-                            }
-                        });
-                        ui.add_space(8.0);
-                        ui.label(
-                            egui::RichText::new("Compte invité : vous pourrez créer un vrai compte ensuite, sans perdre vos données.")
-                                .color(MUTED)
-                                .size(12.0),
-                        );
-                    }
                     // ---------------- Inscription ----------------
                     1 => {
                         ui.label(egui::RichText::new("Votre nom").strong().color(TEXT));
@@ -3263,6 +3260,7 @@ impl eframe::App for ShopApp {
                         self.up_password.clear();
                         self.upgrade_modal = true;
                     }
+                    save_session(&t);
                     self.user = Some(u);
                     self.token = Some(t);
                     self.busy = false;
@@ -3278,6 +3276,7 @@ impl eframe::App for ShopApp {
                     self.set_notice(e);
                 }
                 Msg::UpgradeOk(u, t) => {
+                    save_session(&t);
                     self.user = Some(u);
                     self.token = Some(t);
                     self.busy = false;
@@ -3401,6 +3400,15 @@ impl eframe::App for ShopApp {
                 }
                 self.last_poll = Some(Instant::now());
             }
+        }
+
+        // Ancien compte « par nom » : finalisation OBLIGATOIRE.
+        // On ne rend QUE le fond bloquant + la modale : rien d'autre n'est
+        // visible ni cliquable (déconnexion, navigation, update…).
+        if self.upgrade_modal {
+            self.draw_upgrade_modal(ctx);
+            ctx.request_repaint_after(Duration::from_millis(250));
+            return;
         }
 
         // ---- notification expiree ----
@@ -3714,100 +3722,122 @@ impl eframe::App for ShopApp {
             self.set_notice("Chat réservé aux comptes GitHub ou Google.");
         }
 
-        // Modale : création de compte après connexion invité (données conservées).
-        if self.upgrade_modal {
-            let mut open = true;
-            egui::Area::new(egui::Id::new("upgrade_modal"))
-                .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
-                .show(ctx, |ui| {
-                    egui::Frame::none()
-                        .fill(SURFACE)
-                        .corner_radius(egui::CornerRadius::same(18))
-                        .inner_margin(egui::Margin::same(22))
-                        .stroke(egui::Stroke::new(1.0, GREY))
-                        .show(ui, |ui| {
-                            ui.set_min_width(340.0);
-                            ui.set_max_width(380.0);
-                            ui.label(
-                                egui::RichText::new("Créer un compte")
-                                    .size(19.0)
-                                    .strong()
-                                    .color(TEXT),
-                            );
-                            ui.add_space(6.0);
-                            ui.label(
-                                egui::RichText::new(
-                                    "Vous êtes connecté en tant qu'invité. Créez un compte pour \
-                                     centraliser vos commandes — vos données précédentes sont \
-                                     conservées.",
-                                )
-                                .color(MUTED)
-                                .size(13.0),
-                            );
-                            ui.add_space(14.0);
+        ctx.request_repaint_after(Duration::from_secs(1));
+    }
+}
 
-                            ui.label(egui::RichText::new("Votre nom").strong().color(TEXT));
-                            ui.add_space(4.0);
-                            ui.add(
-                                egui::TextEdit::singleline(&mut self.up_name)
-                                    .desired_width(f32::INFINITY)
-                                    .margin(egui::Margin::same(10)),
-                            );
-                            ui.add_space(8.0);
-                            ui.label(egui::RichText::new("Nom d'utilisateur").strong().color(TEXT));
-                            ui.add_space(4.0);
-                            ui.add(
-                                egui::TextEdit::singleline(&mut self.up_username)
-                                    .desired_width(f32::INFINITY)
-                                    .hint_text("Ex. : lea")
-                                    .margin(egui::Margin::same(10)),
-                            );
-                            ui.add_space(8.0);
-                            ui.label(egui::RichText::new("Mot de passe").strong().color(TEXT));
-                            ui.add_space(4.0);
-                            ui.add(
-                                egui::TextEdit::singleline(&mut self.up_password)
-                                    .desired_width(f32::INFINITY)
-                                    .hint_text("6 caractères minimum")
-                                    .password(true)
-                                    .margin(egui::Margin::same(10)),
-                            );
-                            ui.add_space(16.0);
+impl ShopApp {
+    /// Finalisation obligatoire d'un ancien compte « par nom ».
+    /// Fond opaque + modale : aucun autre élément de l'UI n'est rendu, donc
+    /// rien n'est cliquable derrière. Aucune donnée n'est supprimée : seul le
+    /// nom d'utilisateur et le mot de passe sont demandés.
+    fn draw_upgrade_modal(&mut self, ctx: &egui::Context) {
+        let screen = ctx.screen_rect();
+        egui::Area::new(egui::Id::new("upgrade_blocker"))
+            .fixed_pos(egui::pos2(0.0, 0.0))
+            .show(ctx, |ui| {
+                ui.painter()
+                    .rect_filled(screen, 0.0, egui::Color32::from_black_alpha(215));
+            });
 
-                            let busy = self.busy;
-                            let ok = !self.up_name.trim().is_empty()
-                                && !self.up_username.trim().is_empty()
-                                && self.up_password.len() >= 6;
-                            ui.add_enabled_ui(!busy && ok, |ui| {
-                                let label = if busy {
-                                    "Création..."
-                                } else {
-                                    "Créer mon compte"
-                                };
-                                if btn_primary(ui, label).clicked() {
+        let notice = self.notice.clone();
+        let busy = self.busy;
+        let tx = self.tx.clone();
+        let token = self.token.clone();
+
+        egui::Area::new(egui::Id::new("upgrade_modal"))
+            .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+            .show(ctx, |ui| {
+                egui::Frame::new()
+                    .fill(SURFACE)
+                    .corner_radius(egui::CornerRadius::same(18))
+                    .inner_margin(egui::Margin::same(22))
+                    .stroke(egui::Stroke::new(1.0_f32, ORANGE))
+                    .show(ui, |ui| {
+                        ui.set_min_width(350.0);
+                        ui.set_max_width(400.0);
+                        ui.label(
+                            egui::RichText::new("Finalisez votre compte")
+                                .size(19.0)
+                                .strong()
+                                .color(TEXT),
+                        );
+                        ui.add_space(6.0);
+                        ui.label(
+                            egui::RichText::new(
+                                "Vos commandes et vos données sont conservées. Choisissez un \
+                                 nom d'utilisateur et un mot de passe pour garder accès à \
+                                 votre compte. Votre nom est déjà renseigné.",
+                            )
+                            .color(MUTED)
+                            .size(13.0),
+                        );
+                        ui.add_space(14.0);
+
+                        ui.label(egui::RichText::new("Votre nom").strong().color(TEXT));
+                        ui.add_space(4.0);
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.up_name)
+                                .desired_width(f32::INFINITY)
+                                .interactive(false)
+                                .margin(egui::Margin::same(10)),
+                        );
+                        ui.add_space(8.0);
+                        ui.label(egui::RichText::new("Nom d'utilisateur").strong().color(TEXT));
+                        ui.add_space(4.0);
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.up_username)
+                                .desired_width(f32::INFINITY)
+                                .hint_text("Ex. : lea")
+                                .margin(egui::Margin::same(10)),
+                        );
+                        ui.add_space(8.0);
+                        ui.label(egui::RichText::new("Mot de passe").strong().color(TEXT));
+                        ui.add_space(4.0);
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.up_password)
+                                .desired_width(f32::INFINITY)
+                                .hint_text("6 caractères minimum")
+                                .password(true)
+                                .margin(egui::Margin::same(10)),
+                        );
+
+                        if let Some(n) = notice.as_ref().filter(|n| !n.is_empty()) {
+                            ui.add_space(8.0);
+                            ui.label(egui::RichText::new(n.clone()).color(AMBER).size(12.0));
+                        }
+
+                        ui.add_space(16.0);
+                        let ok = !self.up_name.trim().is_empty()
+                            && !self.up_username.trim().is_empty()
+                            && self.up_password.len() >= 6;
+                        ui.add_enabled_ui(!busy && ok, |ui| {
+                            let label = if busy {
+                                "Enregistrement..."
+                            } else {
+                                "Enregistrer mon compte"
+                            };
+                            if btn_primary(ui, label).clicked() {
+                                if let Some(t) = token.clone() {
                                     self.busy = true;
                                     let name = self.up_name.trim().to_string();
                                     let username = self.up_username.trim().to_string();
                                     let password = self.up_password.clone();
-                                    if let Some(t) = self.token.clone() {
-                                        upgrade_account(self.tx.clone(), t, name, username, password);
-                                    } else {
-                                        self.busy = false;
-                                    }
+                                    upgrade_account(tx.clone(), t, name, username, password);
                                 }
-                            });
-                            ui.add_space(6.0);
-                            if btn_ghost(ui, "Plus tard").clicked() {
-                                open = false;
                             }
                         });
-                });
-            if !open {
-                self.upgrade_modal = false;
-            }
-        }
-
-        ctx.request_repaint_after(Duration::from_secs(1));
+                        ui.add_space(6.0);
+                        ui.label(
+                            egui::RichText::new(
+                                "Étape obligatoire — vous ne pouvez pas quitter cet écran \
+                                 tant que le compte n'est pas finalisé.",
+                            )
+                            .color(MUTED)
+                            .size(11.0),
+                        );
+                    });
+            });
     }
 }
 

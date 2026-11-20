@@ -19,7 +19,6 @@ import com.shoptabouffe.app.core.models.HealthResponse
 import com.shoptabouffe.app.core.models.Message
 import com.shoptabouffe.app.core.models.MessageBody
 import com.shoptabouffe.app.core.models.MessagesResponse
-import com.shoptabouffe.app.core.models.NameBody
 import com.shoptabouffe.app.core.models.Order
 import com.shoptabouffe.app.core.models.OrdersResponse
 import com.shoptabouffe.app.core.models.Product
@@ -68,9 +67,8 @@ interface ShopTaBouffeApi {
     suspend fun health(): HealthResponse
 
     // --- auth -------------------------------------------------------------
-    @POST("auth/demo")
-    suspend fun demoLogin(@Body body: NameBody): AuthResponse
-
+    // Note : la connexion par nom a été supprimée. Seul /auth/upgrade reste
+    // disponible pour les comptes démo déjà existants (données conservées).
     @POST("auth/login")
     suspend fun login(@Body body: CredentialsBody): AuthResponse
 

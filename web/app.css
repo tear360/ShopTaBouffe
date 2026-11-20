@@ -246,6 +246,8 @@ main {
   background: var(--surface-2); border: 1px solid var(--border); outline: none;
 }
 .field input:focus, .field textarea:focus, .field select:focus { border-color: var(--orange); }
+.field input[readonly] { color: var(--muted); background: var(--surface-3); cursor: default; }
+.field-hint { display: block; margin-top: 5px; font-size: 11.5px; color: var(--muted); }
 .field textarea { resize: vertical; min-height: 70px; }
 .total-row {
   display: flex; justify-content: space-between; align-items: center;
@@ -416,6 +418,9 @@ main {
   position: fixed; inset: 0; background: rgba(0, 0, 0, .65); z-index: 50;
   display: flex; align-items: center; justify-content: center; padding: 18px;
 }
+/* Finalisation de compte : modale non fermable, le fond est inerte. */
+.modal-mandatory { z-index: 100; background: rgba(0, 0, 0, .82); }
+.modal-mandatory .modal { max-width: 440px; border-color: var(--orange); }
 .modal {
   background: var(--surface); border: 1px solid var(--border); border-radius: 18px;
   width: 100%; max-width: 480px; max-height: 92vh; overflow-y: auto; padding: 22px;

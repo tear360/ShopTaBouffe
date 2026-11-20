@@ -1,5 +1,5 @@
 !define APP_NAME "ShopTaBouffe"
-!define APP_VERSION "1.0.9"
+!define APP_VERSION "1.0.10"
 !define SRC_EXE "C:\Users\degre_3\Desktop\codes\delivro\rust-app\shoptabouffe\target\release\shoptabouffe.exe"
 
 Name "${APP_NAME} ${APP_VERSION} (Rust preview)"
