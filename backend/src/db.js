@@ -8,6 +8,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const dataDir = path.join(__dirname, '..', 'data');
 fs.mkdirSync(dataDir, { recursive: true });
 
+export const db = new Database(path.join(dataDir, 'delivro.db'));
+
 // Migration : colonne password_hash (comptes par mot de passe)
 try { db.exec('ALTER TABLE users ADD COLUMN password_hash TEXT'); } catch { /* déjà présente */ }
 db.pragma('journal_mode = WAL');

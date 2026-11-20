@@ -326,6 +326,7 @@ function viewLogin() {
       <a class="btn btn-provider github" href="/api/auth/start?provider=github&target=web">${LOGO_GITHUB} Continuer avec GitHub</a>` : ''}
     </div>
   </div>`;
+}
 
 function viewUpgradeModal() {
   const err = state.upgradeError;
@@ -1858,6 +1859,8 @@ document.addEventListener('submit', async (e) => {
     }
     return;
   }
+
+  if (e.target.id === 'chat-form') {
     const inp = $('#chat-msg');
     const body = String(inp.value || '').trim();
     if (!body || state.sending || !state.conv) return;

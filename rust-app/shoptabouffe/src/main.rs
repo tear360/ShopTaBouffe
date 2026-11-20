@@ -12,7 +12,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 const API_BASE: &str = "https://chorizo.dpdns.org/api";
-const APP_VERSION: &str = "1.0.8";
+const APP_VERSION: &str = "1.0.9";
 
 /* ------------------------------------------------------- palette (Theme.kt) */
 
@@ -196,6 +196,8 @@ enum Screen {
 enum Msg {
     LoginOk(User, String),
     LoginErr(String),
+    UpgradeOk(User, String),
+    UpgradeErr(String),
     RoleUpdated(User),
     Products(Vec<Product>),
     Orders(Vec<Order>),
@@ -223,6 +225,18 @@ struct ShopApp {
     user: Option<User>,
     name_input: String,
     busy: bool,
+    // Système de compte : 0 connexion, 1 inscription, 2 connexion par nom
+    login_tab: usize,
+    login_username: String,
+    login_password: String,
+    reg_name: String,
+    reg_username: String,
+    reg_password: String,
+    // Modale d'upgrade (démo → compte complet, données conservées)
+    upgrade_modal: bool,
+    up_name: String,
+    up_username: String,
+    up_password: String,
     notice: Option<String>,
     notice_at: Option<Instant>,
 
@@ -348,6 +362,16 @@ impl Default for ShopApp {
             user: None,
             name_input: String::new(),
             busy: false,
+            login_tab: 0,
+            login_username: String::new(),
+            login_password: String::new(),
+            reg_name: String::new(),
+            reg_username: String::new(),
+            reg_password: String::new(),
+            upgrade_modal: false,
+            up_name: String::new(),
+            up_username: String::new(),
+            up_password: String::new(),
             notice: None,
             notice_at: None,
             products: vec![],
@@ -652,6 +676,103 @@ fn demo_login(tx: Sender<Msg>, name: String) {
             Err(e) => {
                 let _ = match e {
                     (_, m) => tx.send(Msg::LoginErr(m)),
+                };
+            }
+        }
+    });
+}
+
+/// POST /auth/login { username, password } → { token, user }
+fn password_login(tx: Sender<Msg>, username: String, password: String) {
+    thread::spawn(move || {
+        #[derive(Deserialize)]
+        struct R {
+            token: String,
+            user: User,
+        }
+        match http_call(
+            reqwest::Method::POST,
+            format!("{}/auth/login", API_BASE),
+            None,
+            Some(serde_json::json!({ "username": username, "password": password })),
+            None,
+        ) {
+            Ok(t) => parse_ok(&tx, t, |v: R| {
+                let _ = tx.send(Msg::LoginOk(v.user, v.token));
+            }),
+            Err(e) => {
+                let _ = match e {
+                    (_, m) => tx.send(Msg::LoginErr(m)),
+                };
+            }
+        }
+    });
+}
+
+/// POST /auth/register { name, username, password } → { token, user }
+fn register_account(
+    tx: Sender<Msg>,
+    name: String,
+    username: String,
+    password: String,
+) {
+    thread::spawn(move || {
+        #[derive(Deserialize)]
+        struct R {
+            token: String,
+            user: User,
+        }
+        match http_call(
+            reqwest::Method::POST,
+            format!("{}/auth/register", API_BASE),
+            None,
+            Some(serde_json::json!({
+                "name": name, "username": username, "password": password
+            })),
+            None,
+        ) {
+            Ok(t) => parse_ok(&tx, t, |v: R| {
+                let _ = tx.send(Msg::LoginOk(v.user, v.token));
+            }),
+            Err(e) => {
+                let _ = match e {
+                    (_, m) => tx.send(Msg::LoginErr(m)),
+                };
+            }
+        }
+    });
+}
+
+/// POST /auth/upgrade { name, username, password } (auth requise, compte démo)
+/// → transforme le compte démo en compte local en conservant l'id et les données.
+fn upgrade_account(
+    tx: Sender<Msg>,
+    token: String,
+    name: String,
+    username: String,
+    password: String,
+) {
+    thread::spawn(move || {
+        #[derive(Deserialize)]
+        struct R {
+            token: String,
+            user: User,
+        }
+        match http_call(
+            reqwest::Method::POST,
+            format!("{}/auth/upgrade", API_BASE),
+            Some(token),
+            Some(serde_json::json!({
+                "name": name, "username": username, "password": password
+            })),
+            None,
+        ) {
+            Ok(t) => parse_ok(&tx, t, |v: R| {
+                let _ = tx.send(Msg::UpgradeOk(v.user, v.token));
+            }),
+            Err(e) => {
+                let _ = match e {
+                    (_, m) => tx.send(Msg::UpgradeErr(m)),
                 };
             }
         }
@@ -1352,6 +1473,16 @@ impl ShopApp {
         self.admin_tab = 0;
         self.expanded_order = None;
         self.name_input.clear();
+        self.login_tab = 0;
+        self.login_username.clear();
+        self.login_password.clear();
+        self.reg_name.clear();
+        self.reg_username.clear();
+        self.reg_password.clear();
+        self.upgrade_modal = false;
+        self.up_name.clear();
+        self.up_username.clear();
+        self.up_password.clear();
         self.screen = Screen::Login;
         self.set_notice("Déconnecté");
     }
@@ -1473,29 +1604,139 @@ impl ShopApp {
             ui.add_space(28.0);
 
             card(ui, |ui| {
-                ui.label(egui::RichText::new("Votre nom").strong().color(TEXT));
-                ui.add_space(4.0);
-                ui.add(
-                    egui::TextEdit::singleline(&mut self.name_input)
-                        .desired_width(f32::INFINITY)
-                        .hint_text("Ex. : Karim")
-                        .margin(egui::Margin::same(10)),
-                );
-                ui.add_space(12.0);
-                let busy = self.busy;
-                let empty = self.name_input.trim().is_empty();
-                ui.add_enabled_ui(!busy && !empty, |ui| {
-                    let label = if busy {
-                        "Connexion..."
-                    } else {
-                        "Se connecter avec ce nom"
-                    };
-                    if btn_primary(ui, label).clicked() {
-                        self.busy = true;
-                        let name = self.name_input.trim().to_string();
-                        demo_login(self.tx.clone(), name);
+                // --- Onglets : Se connecter / S'inscrire / Connexion par nom ---
+                ui.horizontal(|ui| {
+                    let tabs = ["Se connecter", "S'inscrire", "Connexion par nom"];
+                    for (i, label) in tabs.iter().enumerate() {
+                        let active = self.login_tab == i;
+                        let color = if active { ORANGE } else { MUTED };
+                        let style = if active {
+                            egui::RichText::new(*label).strong().color(color)
+                        } else {
+                            egui::RichText::new(*label).color(color)
+                        };
+                        let resp = ui.add(egui::Button::new(style).frame(false));
+                        if resp.clicked() {
+                            self.login_tab = i;
+                        }
+                        if i + 1 < tabs.len() {
+                            ui.label(egui::RichText::new("·").color(MUTED));
+                        }
                     }
                 });
+                ui.add_space(6.0);
+                let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 2.0), egui::Sense::hover());
+                ui.painter().rect_filled(rect, 0, GREY);
+                ui.add_space(12.0);
+
+                let busy = self.busy;
+
+                match self.login_tab {
+                    // ---------------- Connexion par nom (démo) ----------------
+                    2 => {
+                        ui.label(egui::RichText::new("Votre nom").strong().color(TEXT));
+                        ui.add_space(4.0);
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.name_input)
+                                .desired_width(f32::INFINITY)
+                                .hint_text("Ex. : Karim")
+                                .margin(egui::Margin::same(10)),
+                        );
+                        ui.add_space(12.0);
+                        let empty = self.name_input.trim().is_empty();
+                        ui.add_enabled_ui(!busy && !empty, |ui| {
+                            let label = if busy { "Connexion..." } else { "Se connecter avec ce nom" };
+                            if btn_primary(ui, label).clicked() {
+                                self.busy = true;
+                                let name = self.name_input.trim().to_string();
+                                demo_login(self.tx.clone(), name);
+                            }
+                        });
+                        ui.add_space(8.0);
+                        ui.label(
+                            egui::RichText::new("Compte invité : vous pourrez créer un vrai compte ensuite, sans perdre vos données.")
+                                .color(MUTED)
+                                .size(12.0),
+                        );
+                    }
+                    // ---------------- Inscription ----------------
+                    1 => {
+                        ui.label(egui::RichText::new("Votre nom").strong().color(TEXT));
+                        ui.add_space(4.0);
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.reg_name)
+                                .desired_width(f32::INFINITY)
+                                .hint_text("Ex. : Léa")
+                                .margin(egui::Margin::same(10)),
+                        );
+                        ui.add_space(8.0);
+                        ui.label(egui::RichText::new("Nom d'utilisateur").strong().color(TEXT));
+                        ui.add_space(4.0);
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.reg_username)
+                                .desired_width(f32::INFINITY)
+                                .hint_text("Ex. : lea")
+                                .margin(egui::Margin::same(10)),
+                        );
+                        ui.add_space(8.0);
+                        ui.label(egui::RichText::new("Mot de passe").strong().color(TEXT));
+                        ui.add_space(4.0);
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.reg_password)
+                                .desired_width(f32::INFINITY)
+                                .hint_text("6 caractères minimum")
+                                .password(true)
+                                .margin(egui::Margin::same(10)),
+                        );
+                        ui.add_space(12.0);
+                        let ok = !self.reg_name.trim().is_empty()
+                            && !self.reg_username.trim().is_empty()
+                            && self.reg_password.len() >= 6;
+                        ui.add_enabled_ui(!busy && ok, |ui| {
+                            let label = if busy { "Création..." } else { "Créer mon compte" };
+                            if btn_primary(ui, label).clicked() {
+                                self.busy = true;
+                                let name = self.reg_name.trim().to_string();
+                                let username = self.reg_username.trim().to_string();
+                                let password = self.reg_password.clone();
+                                register_account(self.tx.clone(), name, username, password);
+                            }
+                        });
+                    }
+                    // ---------------- Connexion username / mot de passe ----------------
+                    _ => {
+                        ui.label(egui::RichText::new("Nom d'utilisateur").strong().color(TEXT));
+                        ui.add_space(4.0);
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.login_username)
+                                .desired_width(f32::INFINITY)
+                                .hint_text("Ex. : lea")
+                                .margin(egui::Margin::same(10)),
+                        );
+                        ui.add_space(8.0);
+                        ui.label(egui::RichText::new("Mot de passe").strong().color(TEXT));
+                        ui.add_space(4.0);
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.login_password)
+                                .desired_width(f32::INFINITY)
+                                .hint_text("••••••")
+                                .password(true)
+                                .margin(egui::Margin::same(10)),
+                        );
+                        ui.add_space(12.0);
+                        let empty =
+                            self.login_username.trim().is_empty() || self.login_password.is_empty();
+                        ui.add_enabled_ui(!busy && !empty, |ui| {
+                            let label = if busy { "Connexion..." } else { "Se connecter" };
+                            if btn_primary(ui, label).clicked() {
+                                self.busy = true;
+                                let username = self.login_username.trim().to_string();
+                                let password = self.login_password.clone();
+                                password_login(self.tx.clone(), username, password);
+                            }
+                        });
+                    }
+                }
             });
 
             ui.add_space(18.0);
@@ -3015,6 +3256,13 @@ impl eframe::App for ShopApp {
         while let Ok(m) = self.rx.try_recv() {
             match m {
                 Msg::LoginOk(u, t) => {
+                    let was_demo = u.provider.as_deref() == Some("demo");
+                    if was_demo {
+                        self.up_name = u.name.clone();
+                        self.up_username.clear();
+                        self.up_password.clear();
+                        self.upgrade_modal = true;
+                    }
                     self.user = Some(u);
                     self.token = Some(t);
                     self.busy = false;
@@ -3026,6 +3274,17 @@ impl eframe::App for ShopApp {
                     self.last_poll = Some(Instant::now());
                 }
                 Msg::LoginErr(e) => {
+                    self.busy = false;
+                    self.set_notice(e);
+                }
+                Msg::UpgradeOk(u, t) => {
+                    self.user = Some(u);
+                    self.token = Some(t);
+                    self.busy = false;
+                    self.upgrade_modal = false;
+                    self.set_notice("Compte créé — vos données sont conservées");
+                }
+                Msg::UpgradeErr(e) => {
                     self.busy = false;
                     self.set_notice(e);
                 }
@@ -3453,6 +3712,99 @@ impl eframe::App for ShopApp {
         if self.screen == Screen::Chat && !self.can_chat() {
             self.screen = Screen::Profile;
             self.set_notice("Chat réservé aux comptes GitHub ou Google.");
+        }
+
+        // Modale : création de compte après connexion invité (données conservées).
+        if self.upgrade_modal {
+            let mut open = true;
+            egui::Area::new(egui::Id::new("upgrade_modal"))
+                .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+                .show(ctx, |ui| {
+                    egui::Frame::none()
+                        .fill(SURFACE)
+                        .corner_radius(egui::CornerRadius::same(18))
+                        .inner_margin(egui::Margin::same(22))
+                        .stroke(egui::Stroke::new(1.0, GREY))
+                        .show(ui, |ui| {
+                            ui.set_min_width(340.0);
+                            ui.set_max_width(380.0);
+                            ui.label(
+                                egui::RichText::new("Créer un compte")
+                                    .size(19.0)
+                                    .strong()
+                                    .color(TEXT),
+                            );
+                            ui.add_space(6.0);
+                            ui.label(
+                                egui::RichText::new(
+                                    "Vous êtes connecté en tant qu'invité. Créez un compte pour \
+                                     centraliser vos commandes — vos données précédentes sont \
+                                     conservées.",
+                                )
+                                .color(MUTED)
+                                .size(13.0),
+                            );
+                            ui.add_space(14.0);
+
+                            ui.label(egui::RichText::new("Votre nom").strong().color(TEXT));
+                            ui.add_space(4.0);
+                            ui.add(
+                                egui::TextEdit::singleline(&mut self.up_name)
+                                    .desired_width(f32::INFINITY)
+                                    .margin(egui::Margin::same(10)),
+                            );
+                            ui.add_space(8.0);
+                            ui.label(egui::RichText::new("Nom d'utilisateur").strong().color(TEXT));
+                            ui.add_space(4.0);
+                            ui.add(
+                                egui::TextEdit::singleline(&mut self.up_username)
+                                    .desired_width(f32::INFINITY)
+                                    .hint_text("Ex. : lea")
+                                    .margin(egui::Margin::same(10)),
+                            );
+                            ui.add_space(8.0);
+                            ui.label(egui::RichText::new("Mot de passe").strong().color(TEXT));
+                            ui.add_space(4.0);
+                            ui.add(
+                                egui::TextEdit::singleline(&mut self.up_password)
+                                    .desired_width(f32::INFINITY)
+                                    .hint_text("6 caractères minimum")
+                                    .password(true)
+                                    .margin(egui::Margin::same(10)),
+                            );
+                            ui.add_space(16.0);
+
+                            let busy = self.busy;
+                            let ok = !self.up_name.trim().is_empty()
+                                && !self.up_username.trim().is_empty()
+                                && self.up_password.len() >= 6;
+                            ui.add_enabled_ui(!busy && ok, |ui| {
+                                let label = if busy {
+                                    "Création..."
+                                } else {
+                                    "Créer mon compte"
+                                };
+                                if btn_primary(ui, label).clicked() {
+                                    self.busy = true;
+                                    let name = self.up_name.trim().to_string();
+                                    let username = self.up_username.trim().to_string();
+                                    let password = self.up_password.clone();
+                                    if let Some(t) = self.token.clone() {
+                                        upgrade_account(self.tx.clone(), t, name, username, password);
+                                    } else {
+                                        self.busy = false;
+                                    }
+                                }
+                            });
+                            ui.add_space(6.0);
+                            if btn_ghost(ui, "Plus tard").clicked() {
+                                open = false;
+                            }
+                        });
+                });
+            if !open {
+                self.upgrade_modal = false;
+            }
         }
 
         ctx.request_repaint_after(Duration::from_secs(1));

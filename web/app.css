@@ -76,6 +76,17 @@ img { max-width: 100%; }
 .btn-danger { background: rgba(255, 107, 107, .14); color: var(--red); border-color: rgba(255, 107, 107, .3); }
 .btn-green { background: rgba(52, 211, 153, .16); color: var(--green); border-color: rgba(52, 211, 153, .35); }
 .btn-sm { width: auto; padding: 7px 13px; font-size: 13.5px; border-radius: 10px; }
+.auth-tabs {
+  display: flex; gap: 6px; margin-bottom: 16px;
+  background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: 12px; padding: 4px;
+}
+.auth-tabs .btn { flex: 1; border: none; background: transparent; color: var(--muted); }
+.auth-tabs .btn:hover { background: var(--surface-3); filter: none; }
+.auth-tabs .btn.active {
+  background: var(--surface); color: var(--text);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .18); font-weight: 600;
+}
 .divider {
   display: flex; align-items: center; gap: 12px; color: var(--muted);
   font-size: 12.5px; margin: 18px 0 14px;
