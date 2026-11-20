@@ -26,6 +26,7 @@ data class AccountInfo(
     val role: String = "customer",
     val createdAt: String? = null,
     val hasPassword: Boolean = false,
+    @SerializedName("twoFactorEnabled") val twoFactorEnabled: Boolean = false,
     val identities: List<Identity> = emptyList(),
 ) {
     fun toUser(): User = User(
@@ -57,10 +58,50 @@ data class LinkResponse(val url: String? = null)
 
 data class DeleteResponse(val ok: Boolean = false)
 
+/** Corps de DELETE /api/account : mot de passe OU confirmation « SUPPRIMER ». */
+data class DeleteAccountBody(val password: String? = null, val confirm: String? = null)
+
+/** Réponse générique { ok: true } (mot de passe oublié, reset). */
+data class OkResponse(val ok: Boolean = false)
+
 data class AuthResponse(
     val token: String? = null,
     val user: User? = null,
+    @SerializedName("twoFactorRequired") val twoFactorRequired: Boolean = false,
+    @SerializedName("challengeToken") val challengeToken: String? = null,
 )
+
+/** POST /api/auth/2fa/verify — un seul des deux codes est envoyé (Gson omet les null). */
+data class TwoFactorVerifyBody(
+    val challengeToken: String,
+    val code: String? = null,
+    val recoveryCode: String? = null,
+)
+
+data class ForgotPasswordBody(val email: String)
+
+/** POST /api/account/password — la réponse contient le NOUVEAU JWT à persister. */
+data class PasswordChangeBody(val currentPassword: String, val newPassword: String)
+
+data class PasswordChangeResponse(val ok: Boolean = false, val token: String? = null)
+
+/** POST /api/account/2fa/start — secret en attente + QR au format data URL PNG. */
+data class TwoFactorStartResponse(
+    val secret: String? = null,
+    @SerializedName("otpauthUrl") val otpauthUrl: String? = null,
+    @SerializedName("qrDataUrl") val qrDataUrl: String? = null,
+)
+
+data class TwoFactorCodeBody(val code: String)
+
+/** Réponse de enable (codes de récupération) et de disable ({ enabled: false }). */
+data class TwoFactorEnableResponse(
+    val enabled: Boolean = false,
+    @SerializedName("recoveryCodes") val recoveryCodes: List<String> = emptyList(),
+)
+
+/** POST /api/account/2fa/disable — mot de passe obligatoire si le compte en a un. */
+data class TwoFactorDisableBody(val code: String, val password: String? = null)
 
 data class Product(
     val id: Long = 0,

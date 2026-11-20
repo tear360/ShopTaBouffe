@@ -12,7 +12,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 const API_BASE: &str = "https://chorizo.dpdns.org/api";
-const APP_VERSION: &str = "1.0.11";
+const APP_VERSION: &str = "1.0.12";
 
 /* ------------------------------------------------------- palette (Theme.kt) */
 
@@ -117,6 +117,8 @@ struct Account {
     role: String,
     #[serde(rename = "hasPassword", default)]
     has_password: bool,
+    #[serde(rename = "twoFactorEnabled", default)]
+    two_factor_enabled: bool,
     #[serde(default)]
     identities: Vec<Identity>,
 }
@@ -254,15 +256,33 @@ enum Screen {
     Chat,
 }
 
+/// Sous-catégories de la modale « Gérer le compte » (une seule visible à la fois).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum AccountTab {
+    Informations,
+    Securite,
+    Connexions,
+    Danger,
+}
+
 enum Msg {
     LoginOk(User, String),
     LoginErr(String),
+    TwoFactorRequired(String),
+    ForgotPasswordSent,
     UpgradeOk(User, String),
     UpgradeErr(String),
     RoleUpdated(User),
     Products(Vec<Product>),
     Account(Account),
     AccountDeleted,
+    PasswordChanged(String),
+    TwoFactorStarted {
+        secret: String,
+        qr: Option<egui::ColorImage>,
+    },
+    TwoFactorEnabled(Vec<String>),
+    TwoFactorDisabled,
     Orders(Vec<Order>),
     Summary(FinanceSummary),
     Expenses(Vec<Expense>),
@@ -291,6 +311,13 @@ struct ShopApp {
     login_tab: usize,
     login_username: String,
     login_password: String,
+    // Connexion : récupération de mot de passe et validation 2FA (jamais pour OAuth).
+    forgot_modal: bool,
+    forgot_email: String,
+    forgot_sent: bool,
+    twofa_challenge: Option<String>,
+    twofa_login_code: String,
+    twofa_login_recovery: String,
     reg_name: String,
     reg_username: String,
     reg_password: String,
@@ -309,6 +336,18 @@ struct ShopApp {
     account_confirm_delete: bool,
     // Modale « Gérer le compte » (contenu de la section Mon compte).
     account_modal: bool,
+    account_tab: AccountTab,
+    account_pw_current: String,
+    account_pw_new: String,
+    account_pw_confirm: String,
+    // Configuration 2FA : secret/QR reçus de /2fa/start, codes affichés une seule fois.
+    twofa_secret: String,
+    twofa_qr: Option<egui::TextureHandle>,
+    twofa_setup_code: String,
+    recovery_codes: Vec<String>,
+    twofa_disable_code: String,
+    twofa_disable_password: String,
+    account_delete_input: String,
 
     products: Vec<Product>,
     search: String,
@@ -458,6 +497,12 @@ impl Default for ShopApp {
             login_tab: 0,
             login_username: String::new(),
             login_password: String::new(),
+            forgot_modal: false,
+            forgot_email: String::new(),
+            forgot_sent: false,
+            twofa_challenge: None,
+            twofa_login_code: String::new(),
+            twofa_login_recovery: String::new(),
             reg_name: String::new(),
             reg_username: String::new(),
             reg_password: String::new(),
@@ -472,6 +517,17 @@ impl Default for ShopApp {
             account_phone: String::new(),
             account_confirm_delete: false,
             account_modal: false,
+            account_tab: AccountTab::Informations,
+            account_pw_current: String::new(),
+            account_pw_new: String::new(),
+            account_pw_confirm: String::new(),
+            twofa_secret: String::new(),
+            twofa_qr: None,
+            twofa_setup_code: String::new(),
+            recovery_codes: vec![],
+            twofa_disable_code: String::new(),
+            twofa_disable_password: String::new(),
+            account_delete_input: String::new(),
             products: vec![],
             search: String::new(),
             category: None,
@@ -579,6 +635,12 @@ fn forward_err(tx: &Sender<Msg>, err: (u16, String)) {
         (401, _) => tx.send(Msg::Unauthorized),
         (_, m) => tx.send(Msg::Error(m)),
     };
+}
+
+/// Erreurs de formulaire : un 401 signifie ici « mot de passe / code incorrect »,
+/// pas une session expirée. On conserve donc la session courante.
+fn forward_action_err(tx: &Sender<Msg>, err: (u16, String)) {
+    let _ = tx.send(Msg::Error(err.1));
 }
 
 /// Désérialise un corps JSON, sinon erreur serveur affichable.
@@ -694,20 +756,185 @@ fn unlink_account(tx: Sender<Msg>, token: String, provider: String) {
     });
 }
 
-/// DELETE /api/account — les finances sont conservées côté serveur.
-fn delete_account(tx: Sender<Msg>, token: String) {
+/// DELETE /api/account — { password } ou { confirm: "SUPPRIMER" } selon le compte.
+/// Les finances sont conservées côté serveur.
+fn delete_account(tx: Sender<Msg>, token: String, body: serde_json::Value) {
     thread::spawn(move || {
         match http_call(
             reqwest::Method::DELETE,
             format!("{}/account", API_BASE),
             Some(token),
-            None,
+            Some(body),
             None,
         ) {
             Ok(_) => {
                 let _ = tx.send(Msg::AccountDeleted);
             }
-            Err(e) => forward_err(&tx, e),
+            Err(e) => forward_action_err(&tx, e),
+        }
+    });
+}
+
+/// POST /api/account/password — renvoie un NOUVEAU JWT (anciens jetons révoqués).
+fn change_password(tx: Sender<Msg>, token: String, current: String, next: String) {
+    thread::spawn(move || {
+        #[derive(Deserialize)]
+        struct R {
+            token: String,
+        }
+        match http_call(
+            reqwest::Method::POST,
+            format!("{}/account/password", API_BASE),
+            Some(token),
+            Some(serde_json::json!({
+                "currentPassword": current, "newPassword": next
+            })),
+            None,
+        ) {
+            Ok(t) => parse_ok(&tx, t, |v: R| {
+                let _ = tx.send(Msg::PasswordChanged(v.token));
+            }),
+            Err(e) => forward_action_err(&tx, e),
+        }
+    });
+}
+
+/// Décode le QR PNG (`data:image/png;base64,...`) renvoyé par /2fa/start.
+fn decode_qr_image(data_url: &str) -> Option<egui::ColorImage> {
+    use base64::Engine;
+    let encoded = data_url.split_once(',').map(|(_, b)| b).unwrap_or(data_url);
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(encoded.trim())
+        .ok()?;
+    let img = image::load_from_memory(&bytes).ok()?.to_rgba8();
+    Some(egui::ColorImage::from_rgba_unmultiplied(
+        [img.width() as usize, img.height() as usize],
+        img.as_raw(),
+    ))
+}
+
+/// POST /api/account/2fa/start — secret + QR PNG en base64.
+fn two_factor_start(tx: Sender<Msg>, token: String) {
+    thread::spawn(move || {
+        #[derive(Deserialize)]
+        struct R {
+            secret: String,
+            #[serde(rename = "qrDataUrl", default)]
+            qr_data_url: Option<String>,
+        }
+        match http_call(
+            reqwest::Method::POST,
+            format!("{}/account/2fa/start", API_BASE),
+            Some(token),
+            None,
+            None,
+        ) {
+            Ok(t) => match serde_json::from_str::<R>(&t) {
+                Ok(v) => {
+                    let qr = v.qr_data_url.as_deref().and_then(decode_qr_image);
+                    let _ = tx.send(Msg::TwoFactorStarted {
+                        secret: v.secret,
+                        qr,
+                    });
+                }
+                Err(_) => {
+                    let _ = tx.send(Msg::Error("Réponse du serveur invalide.".into()));
+                }
+            },
+            Err(e) => forward_action_err(&tx, e),
+        }
+    });
+}
+
+/// POST /api/account/2fa/enable — renvoie les 8 codes de récupération.
+fn two_factor_enable(tx: Sender<Msg>, token: String, code: String) {
+    thread::spawn(move || {
+        #[derive(Deserialize)]
+        struct R {
+            #[serde(rename = "recoveryCodes", default)]
+            recovery_codes: Vec<String>,
+        }
+        match http_call(
+            reqwest::Method::POST,
+            format!("{}/account/2fa/enable", API_BASE),
+            Some(token),
+            Some(serde_json::json!({ "code": code })),
+            None,
+        ) {
+            Ok(t) => parse_ok(&tx, t, |v: R| {
+                let _ = tx.send(Msg::TwoFactorEnabled(v.recovery_codes));
+            }),
+            Err(e) => forward_action_err(&tx, e),
+        }
+    });
+}
+
+/// POST /api/account/2fa/disable — code + mot de passe si le compte en a un.
+fn two_factor_disable(tx: Sender<Msg>, token: String, code: String, password: String) {
+    thread::spawn(move || {
+        match http_call(
+            reqwest::Method::POST,
+            format!("{}/account/2fa/disable", API_BASE),
+            Some(token),
+            Some(serde_json::json!({ "code": code, "password": password })),
+            None,
+        ) {
+            Ok(_) => {
+                let _ = tx.send(Msg::TwoFactorDisabled);
+            }
+            Err(e) => forward_action_err(&tx, e),
+        }
+    });
+}
+
+/// POST /api/auth/forgot-password — réponse neutre, même si l'email est inconnu.
+fn forgot_password(tx: Sender<Msg>, email: String) {
+    thread::spawn(move || {
+        match http_call(
+            reqwest::Method::POST,
+            format!("{}/auth/forgot-password", API_BASE),
+            None,
+            Some(serde_json::json!({ "email": email })),
+            None,
+        ) {
+            Ok(_) => {
+                let _ = tx.send(Msg::ForgotPasswordSent);
+            }
+            Err(e) => forward_action_err(&tx, e),
+        }
+    });
+}
+
+/// POST /api/auth/2fa/verify — challenge reçu à la connexion par mot de passe.
+fn verify_two_factor_login(
+    tx: Sender<Msg>,
+    challenge: String,
+    code: String,
+    recovery: String,
+) {
+    thread::spawn(move || {
+        #[derive(Deserialize)]
+        struct R {
+            token: String,
+            user: User,
+        }
+        match http_call(
+            reqwest::Method::POST,
+            format!("{}/auth/2fa/verify", API_BASE),
+            None,
+            Some(serde_json::json!({
+                "challengeToken": challenge,
+                "code": code,
+                "recoveryCode": recovery,
+            })),
+            None,
+        ) {
+            Ok(t) => parse_ok(&tx, t, |v: R| {
+                let _ = tx.send(Msg::LoginOk(v.user, v.token));
+            }),
+            Err(e) => {
+                let _ = tx.send(Msg::LoginErr(e.1));
+            }
         }
     });
 }
@@ -908,7 +1135,8 @@ fn restore_session(tx: Sender<Msg>, token: String) {
     });
 }
 
-/// POST /auth/login { username, password } → { token, user }
+/// POST /auth/login { username, password }
+/// → { token, user } ou { twoFactorRequired: true, challengeToken } (mot de passe uniquement).
 fn password_login(tx: Sender<Msg>, username: String, password: String) {
     thread::spawn(move || {
         #[derive(Deserialize)]
@@ -923,13 +1151,27 @@ fn password_login(tx: Sender<Msg>, username: String, password: String) {
             Some(serde_json::json!({ "username": username, "password": password })),
             None,
         ) {
-            Ok(t) => parse_ok(&tx, t, |v: R| {
-                let _ = tx.send(Msg::LoginOk(v.user, v.token));
-            }),
+            Ok(t) => match serde_json::from_str::<serde_json::Value>(&t) {
+                Ok(v) if v.get("twoFactorRequired").and_then(|b| b.as_bool()) == Some(true) => {
+                    match v.get("challengeToken").and_then(|c| c.as_str()) {
+                        Some(c) => {
+                            let _ = tx.send(Msg::TwoFactorRequired(c.to_string()));
+                        }
+                        None => {
+                            let _ =
+                                tx.send(Msg::LoginErr("Réponse 2FA invalide du serveur.".into()));
+                        }
+                    }
+                }
+                Ok(_) => parse_ok(&tx, t, |v: R| {
+                    let _ = tx.send(Msg::LoginOk(v.user, v.token));
+                }),
+                Err(_) => {
+                    let _ = tx.send(Msg::LoginErr("Réponse du serveur invalide.".into()));
+                }
+            },
             Err(e) => {
-                let _ = match e {
-                    (_, m) => tx.send(Msg::LoginErr(m)),
-                };
+                let _ = tx.send(Msg::LoginErr(e.1));
             }
         }
     });
@@ -1804,12 +2046,36 @@ impl ShopApp {
         }
     }
 
+    /// Ferme la modale compte et efface tous les secrets saisis à l'écran.
+    fn close_account_modal(&mut self) {
+        self.account_modal = false;
+        self.account_confirm_delete = false;
+        self.account_delete_input.clear();
+        self.account_tab = AccountTab::Informations;
+        self.account_pw_current.clear();
+        self.account_pw_new.clear();
+        self.account_pw_confirm.clear();
+        self.recovery_codes.clear();
+        self.twofa_secret.clear();
+        self.twofa_qr = None;
+        self.twofa_setup_code.clear();
+        self.twofa_disable_code.clear();
+        self.twofa_disable_password.clear();
+    }
+
     fn logout(&mut self) {
         if self.upgrade_modal {
             self.set_notice("Finalisez votre compte avant de vous déconnecter.");
             return;
         }
         clear_session();
+        self.forgot_modal = false;
+        self.forgot_email.clear();
+        self.forgot_sent = false;
+        self.twofa_challenge = None;
+        self.twofa_login_code.clear();
+        self.twofa_login_recovery.clear();
+        self.close_account_modal();
         self.user = None;
         self.token = None;
         self.conversations.clear();
@@ -1824,8 +2090,6 @@ impl ShopApp {
         self.account = None;
         self.account_email.clear();
         self.account_phone.clear();
-        self.account_confirm_delete = false;
-        self.account_modal = false;
         self.order_phone.clear();
         self.admin_tab = 0;
         self.create_menu = false;
@@ -1952,7 +2216,8 @@ impl ShopApp {
 
     fn ui_login(&mut self, ui: &mut egui::Ui) {
         ui.vertical_centered(|ui| {
-            ui.set_max_width(420.0);
+            // Largeur maximale only : le contenu suit la taille de la fenêtre.
+            ui.set_max_width(ui.available_width().min(480.0));
             ui.add_space(48.0);
 
             // Logo dessiné
@@ -2086,6 +2351,20 @@ impl ShopApp {
                                 password_login(self.tx.clone(), username, password);
                             }
                         });
+                        ui.add_space(6.0);
+                        ui.horizontal_wrapped(|ui| {
+                            let link = egui::Button::new(
+                                egui::RichText::new("Mot de passe oublié ?")
+                                    .color(ORANGE)
+                                    .size(12.0),
+                            )
+                            .frame(false);
+                            if ui.add(link).clicked() {
+                                self.forgot_email = self.login_username.trim().to_string();
+                                self.forgot_sent = false;
+                                self.forgot_modal = true;
+                            }
+                        });
                     }
                 }
             });
@@ -2094,7 +2373,7 @@ impl ShopApp {
             ui.label(egui::RichText::new("ou continuer avec").color(MUTED));
             ui.add_space(10.0);
 
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 let google = egui::Button::new(
                     egui::RichText::new("Continuer avec Google")
                         .color(egui::Color32::from_rgb(32, 33, 36))
@@ -3954,6 +4233,10 @@ impl eframe::App for ShopApp {
                     self.user = Some(u);
                     self.token = Some(t.clone());
                     self.busy = false;
+                    self.twofa_challenge = None;
+                    self.twofa_login_code.clear();
+                    self.twofa_login_recovery.clear();
+                    self.forgot_modal = false;
                     self.screen = Screen::Boutique;
                     self.set_notice("Connecté");
                     fetch_products(self.tx.clone(), self.token.clone());
@@ -3965,6 +4248,59 @@ impl eframe::App for ShopApp {
                 Msg::LoginErr(e) => {
                     self.busy = false;
                     self.set_notice(e);
+                }
+                Msg::TwoFactorRequired(challenge) => {
+                    self.busy = false;
+                    self.twofa_challenge = Some(challenge);
+                    self.twofa_login_code.clear();
+                    self.twofa_login_recovery.clear();
+                }
+                Msg::ForgotPasswordSent => {
+                    self.busy = false;
+                    self.forgot_sent = true;
+                }
+                Msg::PasswordChanged(new_token) => {
+                    // Anciens jetons révoqués côté serveur : garder la session courante.
+                    save_session(&new_token);
+                    self.token = Some(new_token);
+                    self.busy = false;
+                    self.account_pw_current.clear();
+                    self.account_pw_new.clear();
+                    self.account_pw_confirm.clear();
+                    self.set_notice("Mot de passe modifié — vous restez connecté");
+                }
+                Msg::TwoFactorStarted { secret, qr } => {
+                    self.busy = false;
+                    self.twofa_secret = secret;
+                    self.twofa_qr = qr.map(|img| {
+                        ctx.load_texture("account-2fa-qr", img, egui::TextureOptions::LINEAR)
+                    });
+                    self.twofa_setup_code.clear();
+                    self.set_notice("Scannez le QR code ou saisissez le secret ci-dessous.");
+                }
+                Msg::TwoFactorEnabled(codes) => {
+                    self.busy = false;
+                    self.recovery_codes = codes;
+                    self.twofa_secret.clear();
+                    self.twofa_qr = None;
+                    self.twofa_setup_code.clear();
+                    self.set_notice("Double authentification activée");
+                    if let Some(t) = self.token.clone() {
+                        fetch_account(self.tx.clone(), t);
+                    }
+                }
+                Msg::TwoFactorDisabled => {
+                    self.busy = false;
+                    self.recovery_codes.clear();
+                    self.twofa_secret.clear();
+                    self.twofa_qr = None;
+                    self.twofa_setup_code.clear();
+                    self.twofa_disable_code.clear();
+                    self.twofa_disable_password.clear();
+                    self.set_notice("Double authentification désactivée");
+                    if let Some(t) = self.token.clone() {
+                        fetch_account(self.tx.clone(), t);
+                    }
                 }
                 Msg::UpgradeOk(u, t) => {
                     save_session(&t);
@@ -4464,6 +4800,14 @@ impl eframe::App for ShopApp {
             self.draw_account_modal(ctx);
         }
 
+        // Connexion : mot de passe oublié et challenge 2FA (pas d'OAuth ici).
+        if self.forgot_modal {
+            self.draw_forgot_modal(ctx);
+        }
+        if self.twofa_challenge.is_some() {
+            self.draw_login_2fa_modal(ctx);
+        }
+
         ctx.request_repaint_after(Duration::from_secs(1));
     }
 }
@@ -4582,8 +4926,586 @@ impl ShopApp {
             });
     }
 
-    /// Modale « Gérer le compte » : coordonnées, mot de passe et identités
-    /// liées. Fond bloquant + Area centrée, comme pour l'upgrade obligatoire.
+    /// Champ de formulaire pleine largeur, utilisé par toutes les modales.
+    fn form_field(ui: &mut egui::Ui, label: &str, value: &mut String, hint: &str, password: bool) {
+        ui.label(egui::RichText::new(label).color(MUTED).size(12.0));
+        ui.add(
+            egui::TextEdit::singleline(value)
+                .desired_width(f32::INFINITY)
+                .hint_text(hint)
+                .password(password)
+                .margin(egui::Margin::same(10)),
+        );
+    }
+
+    /// Modale « Mot de passe oublié ? » : message neutre, pas d'énumération.
+    fn draw_forgot_modal(&mut self, ctx: &egui::Context) {
+        let screen = ctx.screen_rect();
+        egui::Area::new(egui::Id::new("forgot_blocker"))
+            .fixed_pos(egui::pos2(0.0, 0.0))
+            .show(ctx, |ui| {
+                ui.painter()
+                    .rect_filled(screen, 0.0, egui::Color32::from_black_alpha(200));
+            });
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            self.forgot_modal = false;
+            return;
+        }
+
+        let width = (screen.width() - 48.0).min(480.0).max(240.0);
+        let busy = self.busy;
+        egui::Area::new(egui::Id::new("forgot_modal"))
+            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+            .constrain_to(screen.shrink(8.0))
+            .show(ctx, |ui| {
+                ui.set_width(width);
+                egui::Frame::new()
+                    .fill(SURFACE)
+                    .corner_radius(egui::CornerRadius::same(18))
+                    .inner_margin(egui::Margin::same(20))
+                    .stroke(egui::Stroke::new(1.0_f32, ORANGE))
+                    .show(ui, |ui| {
+                        ui.label(
+                            egui::RichText::new("Mot de passe oublié")
+                                .size(18.0)
+                                .strong()
+                                .color(TEXT),
+                        );
+                        ui.add_space(6.0);
+                        ui.label(
+                            egui::RichText::new(
+                                "Saisissez votre adresse e-mail. Si un compte lui est associé, \
+                                 un lien de réinitialisation vous sera envoyé.",
+                            )
+                            .color(MUTED)
+                            .size(12.0),
+                        );
+                        ui.add_space(10.0);
+                        Self::form_field(ui, "Email", &mut self.forgot_email, "vous@exemple.com", false);
+                        if self.forgot_sent {
+                            ui.add_space(8.0);
+                            ui.label(
+                                egui::RichText::new(
+                                    "Si un compte est associé à cette adresse, un lien de \
+                                     réinitialisation a été envoyé.",
+                                )
+                                .color(GREEN)
+                                .size(12.0),
+                            );
+                        }
+                        ui.add_space(12.0);
+                        ui.horizontal_wrapped(|ui| {
+                            if btn_ghost(ui, "Fermer").clicked() {
+                                self.forgot_modal = false;
+                            }
+                            let ready = !self.forgot_email.trim().is_empty();
+                            ui.add_enabled_ui(!busy && ready, |ui| {
+                                let label = if busy { "Envoi..." } else { "Envoyer le lien" };
+                                if btn_primary(ui, label).clicked() {
+                                    self.busy = true;
+                                    let email = self.forgot_email.trim().to_string();
+                                    forgot_password(self.tx.clone(), email);
+                                }
+                            });
+                        });
+                    });
+            });
+    }
+
+    /// Modale de validation 2FA après /auth/login (jamais utilisée pour OAuth).
+    fn draw_login_2fa_modal(&mut self, ctx: &egui::Context) {
+        let screen = ctx.screen_rect();
+        let Some(challenge) = self.twofa_challenge.clone() else {
+            return;
+        };
+        egui::Area::new(egui::Id::new("login_2fa_blocker"))
+            .fixed_pos(egui::pos2(0.0, 0.0))
+            .show(ctx, |ui| {
+                ui.painter()
+                    .rect_filled(screen, 0.0, egui::Color32::from_black_alpha(200));
+            });
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            self.twofa_challenge = None;
+            self.twofa_login_code.clear();
+            self.twofa_login_recovery.clear();
+            return;
+        }
+
+        let width = (screen.width() - 48.0).min(480.0).max(240.0);
+        let busy = self.busy;
+        egui::Area::new(egui::Id::new("login_2fa_modal"))
+            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+            .constrain_to(screen.shrink(8.0))
+            .show(ctx, |ui| {
+                ui.set_width(width);
+                egui::Frame::new()
+                    .fill(SURFACE)
+                    .corner_radius(egui::CornerRadius::same(18))
+                    .inner_margin(egui::Margin::same(20))
+                    .stroke(egui::Stroke::new(1.0_f32, ORANGE))
+                    .show(ui, |ui| {
+                        ui.label(
+                            egui::RichText::new("Double authentification")
+                                .size(18.0)
+                                .strong()
+                                .color(TEXT),
+                        );
+                        ui.add_space(6.0);
+                        ui.label(
+                            egui::RichText::new(
+                                "Saisissez le code à 6 chiffres de votre application, ou un \
+                                 code de récupération.",
+                            )
+                            .color(MUTED)
+                            .size(12.0),
+                        );
+                        ui.add_space(10.0);
+                        Self::form_field(ui, "Code", &mut self.twofa_login_code, "123456", false);
+                        ui.add_space(6.0);
+                        Self::form_field(
+                            ui,
+                            "Code de récupération",
+                            &mut self.twofa_login_recovery,
+                            "XXXX-XXXX-XXXX",
+                            false,
+                        );
+                        ui.add_space(12.0);
+                        ui.horizontal_wrapped(|ui| {
+                            if btn_ghost(ui, "Annuler").clicked() {
+                                self.twofa_challenge = None;
+                                self.twofa_login_code.clear();
+                                self.twofa_login_recovery.clear();
+                            }
+                            let ready = !self.twofa_login_code.trim().is_empty()
+                                || !self.twofa_login_recovery.trim().is_empty();
+                            ui.add_enabled_ui(!busy && ready, |ui| {
+                                let label = if busy { "Vérification..." } else { "Vérifier" };
+                                if btn_primary(ui, label).clicked() {
+                                    self.busy = true;
+                                    verify_two_factor_login(
+                                        self.tx.clone(),
+                                        challenge.clone(),
+                                        self.twofa_login_code.trim().to_string(),
+                                        self.twofa_login_recovery.trim().to_string(),
+                                    );
+                                }
+                            });
+                        });
+                    });
+            });
+    }
+
+    /// Onglet Informations : coordonnées (PATCH /account).
+    fn account_tab_infos(&mut self, ui: &mut egui::Ui, tx: &Sender<Msg>, token: &Option<String>) {
+        Self::form_field(ui, "Email", &mut self.account_email, "vous@exemple.com", false);
+        ui.add_space(6.0);
+        Self::form_field(
+            ui,
+            "Téléphone",
+            &mut self.account_phone,
+            "Utilisé pour vos commandes",
+            false,
+        );
+        ui.add_space(10.0);
+        ui.horizontal_wrapped(|ui| {
+            if btn_primary(ui, "Enregistrer").clicked() {
+                if let Some(t) = token.clone() {
+                    let email = self.account_email.trim().to_string();
+                    let phone = self.account_phone.trim().to_string();
+                    update_account(tx.clone(), t, email, phone);
+                }
+            }
+            if btn_ghost(ui, "Rafraîchir").clicked() {
+                if let Some(t) = token.clone() {
+                    fetch_account(tx.clone(), t);
+                }
+            }
+        });
+    }
+
+    /// Onglet Sécurité : mot de passe et double authentification.
+    fn account_tab_security(
+        &mut self,
+        ui: &mut egui::Ui,
+        tx: &Sender<Msg>,
+        token: &Option<String>,
+        has_password: bool,
+        two_factor_enabled: bool,
+    ) {
+        section_title(ui, "Changer le mot de passe");
+        if has_password {
+            Self::form_field(
+                ui,
+                "Mot de passe actuel",
+                &mut self.account_pw_current,
+                "",
+                true,
+            );
+            ui.add_space(6.0);
+            Self::form_field(
+                ui,
+                "Nouveau mot de passe",
+                &mut self.account_pw_new,
+                "6 caractères minimum",
+                true,
+            );
+            ui.add_space(6.0);
+            Self::form_field(
+                ui,
+                "Confirmer le nouveau mot de passe",
+                &mut self.account_pw_confirm,
+                "",
+                true,
+            );
+            ui.add_space(8.0);
+            ui.horizontal_wrapped(|ui| {
+                let ready = !self.account_pw_current.is_empty()
+                    && self.account_pw_new.len() >= 6
+                    && self.account_pw_new == self.account_pw_confirm;
+                ui.add_enabled_ui(!self.busy && ready, |ui| {
+                    let label = if self.busy {
+                        "Enregistrement..."
+                    } else {
+                        "Changer le mot de passe"
+                    };
+                    if btn_primary(ui, label).clicked() {
+                        if let Some(t) = token.clone() {
+                            self.busy = true;
+                            change_password(
+                                self.tx.clone(),
+                                t,
+                                self.account_pw_current.clone(),
+                                self.account_pw_new.clone(),
+                            );
+                        }
+                    }
+                });
+                if btn_ghost(ui, "Effacer").clicked() {
+                    self.account_pw_current.clear();
+                    self.account_pw_new.clear();
+                    self.account_pw_confirm.clear();
+                }
+            });
+            ui.label(
+                egui::RichText::new(
+                    "6 caractères minimum. Les autres appareils seront déconnectés.",
+                )
+                .color(MUTED)
+                .size(11.0),
+            );
+        } else {
+            ui.label(
+                egui::RichText::new("Ce compte n'a pas de mot de passe (connexion OAuth).")
+                    .color(MUTED)
+                    .size(12.0),
+            );
+        }
+
+        ui.add_space(14.0);
+        section_title(ui, "Double authentification");
+        ui.label(
+            egui::RichText::new(if two_factor_enabled {
+                "Statut : activée"
+            } else {
+                "Statut : désactivée"
+            })
+            .color(if two_factor_enabled { GREEN } else { MUTED })
+            .size(12.0),
+        );
+        ui.add_space(6.0);
+
+        if !two_factor_enabled {
+            ui.label(
+                egui::RichText::new(
+                    "Scannez le QR code avec votre application d'authentification, ou \
+                     saisissez le secret manuellement, puis validez avec un code à 6 chiffres.",
+                )
+                .color(MUTED)
+                .size(12.0),
+            );
+            if self.twofa_secret.is_empty() {
+                ui.add_space(8.0);
+                ui.horizontal_wrapped(|ui| {
+                    let label = if self.busy {
+                        "Génération..."
+                    } else {
+                        "Configurer la double authentification"
+                    };
+                    ui.add_enabled_ui(!self.busy, |ui| {
+                        if btn_primary(ui, label).clicked() {
+                            if let Some(t) = token.clone() {
+                                self.busy = true;
+                                two_factor_start(self.tx.clone(), t);
+                            }
+                        }
+                    });
+                });
+            } else {
+                ui.add_space(8.0);
+                if let Some(texture) = self.twofa_qr.as_ref() {
+                    let size = 200.0_f32.min(ui.available_width().max(80.0));
+                    ui.add(
+                        egui::Image::from_texture(texture)
+                            .fit_to_exact_size(egui::vec2(size, size)),
+                    );
+                } else {
+                    ui.label(
+                        egui::RichText::new("QR indisponible : utilisez le secret ci-dessous.")
+                            .color(AMBER)
+                            .size(11.0),
+                    );
+                }
+                ui.add_space(6.0);
+                Self::form_field(
+                    ui,
+                    "Secret (sélectionnez pour copier)",
+                    &mut self.twofa_secret,
+                    "",
+                    false,
+                );
+                ui.add_space(6.0);
+                Self::form_field(
+                    ui,
+                    "Code à 6 chiffres",
+                    &mut self.twofa_setup_code,
+                    "123456",
+                    false,
+                );
+                ui.add_space(8.0);
+                ui.horizontal_wrapped(|ui| {
+                    let ready = self.twofa_setup_code.trim().len() >= 6;
+                    ui.add_enabled_ui(!self.busy && ready, |ui| {
+                        if btn_primary(ui, "Activer").clicked() {
+                            if let Some(t) = token.clone() {
+                                self.busy = true;
+                                two_factor_enable(
+                                    self.tx.clone(),
+                                    t,
+                                    self.twofa_setup_code.trim().to_string(),
+                                );
+                            }
+                        }
+                    });
+                    if btn_ghost(ui, "Recommencer").clicked() {
+                        if let Some(t) = token.clone() {
+                            self.busy = true;
+                            two_factor_start(tx.clone(), t);
+                        }
+                    }
+                });
+            }
+        } else {
+            ui.label(
+                egui::RichText::new("Pour désactiver la 2FA, saisissez un code courant.")
+                    .color(MUTED)
+                    .size(12.0),
+            );
+            ui.add_space(6.0);
+            Self::form_field(
+                ui,
+                "Code à 6 chiffres",
+                &mut self.twofa_disable_code,
+                "123456",
+                false,
+            );
+            if has_password {
+                ui.add_space(6.0);
+                Self::form_field(
+                    ui,
+                    "Mot de passe",
+                    &mut self.twofa_disable_password,
+                    "",
+                    true,
+                );
+            }
+            ui.add_space(8.0);
+            ui.horizontal_wrapped(|ui| {
+                let ready = self.twofa_disable_code.trim().len() >= 6
+                    && (!has_password || !self.twofa_disable_password.is_empty());
+                ui.add_enabled_ui(!self.busy && ready, |ui| {
+                    if btn_danger(ui, "Désactiver la double authentification").clicked() {
+                        if let Some(t) = token.clone() {
+                            self.busy = true;
+                            two_factor_disable(
+                                self.tx.clone(),
+                                t,
+                                self.twofa_disable_code.trim().to_string(),
+                                self.twofa_disable_password.clone(),
+                            );
+                        }
+                    }
+                });
+            });
+        }
+
+        // Codes de récupération : affichés une seule fois après activation.
+        if !self.recovery_codes.is_empty() {
+            ui.add_space(12.0);
+            egui::Frame::new()
+                .fill(alpha(GREEN, 22))
+                .corner_radius(egui::CornerRadius::same(12))
+                .inner_margin(egui::Margin::same(12))
+                .show(ui, |ui| {
+                    ui.label(
+                        egui::RichText::new("Codes de récupération — à conserver hors ligne")
+                            .strong()
+                            .color(GREEN)
+                            .size(12.0),
+                    );
+                    ui.label(
+                        egui::RichText::new("Ils ne seront plus affichés après fermeture.")
+                            .color(MUTED)
+                            .size(11.0),
+                    );
+                    ui.add_space(4.0);
+                    for code in &self.recovery_codes {
+                        ui.label(
+                            egui::RichText::new(code)
+                                .font(egui::FontId::monospace(13.0))
+                                .color(TEXT),
+                        );
+                    }
+                    ui.add_space(6.0);
+                    if btn_primary(ui, "J'ai noté ces codes").clicked() {
+                        self.recovery_codes.clear();
+                    }
+                });
+        }
+    }
+
+    /// Onglet Connexions : identités GitHub/Google, lier et dissocier.
+    fn account_tab_connections(
+        &mut self,
+        ui: &mut egui::Ui,
+        tx: &Sender<Msg>,
+        token: &Option<String>,
+        identities: &[Identity],
+    ) {
+        ui.label(
+            egui::RichText::new("Connexions liées")
+                .strong()
+                .size(13.0)
+                .color(TEXT),
+        );
+        if identities.is_empty() {
+            ui.label(
+                egui::RichText::new("Aucune identité liée.")
+                    .color(MUTED)
+                    .size(12.0),
+            );
+        }
+        for identity in identities {
+            ui.add_space(4.0);
+            ui.horizontal_wrapped(|ui| {
+                ui.label(
+                    egui::RichText::new(&identity.provider)
+                        .strong()
+                        .size(12.0)
+                        .color(TEXT),
+                );
+                if let Some(email) = identity.email.as_ref().filter(|e| !e.is_empty()) {
+                    ui.label(egui::RichText::new(email).color(MUTED).size(11.0));
+                }
+                if let Some(date) = &identity.created_at {
+                    let day: String = date.chars().take(10).collect();
+                    ui.label(egui::RichText::new(day).color(MUTED).size(10.0));
+                }
+                if btn_ghost(ui, "Dissocier").clicked() {
+                    if let Some(t) = token.clone() {
+                        unlink_account(tx.clone(), t, identity.provider.clone());
+                    }
+                }
+            });
+        }
+        ui.add_space(8.0);
+        ui.horizontal_wrapped(|ui| {
+            for (provider, label) in [("github", "Lier GitHub"), ("google", "Lier Google")] {
+                if identities.iter().any(|i| i.provider == provider) {
+                    continue;
+                }
+                if btn_ghost(ui, label).clicked() {
+                    if let Some(t) = token.clone() {
+                        link_account(tx.clone(), t, provider);
+                    }
+                }
+            }
+        });
+    }
+
+    /// Onglet Danger : suppression protégée par mot de passe ou par `SUPPRIMER`.
+    fn account_tab_danger(
+        &mut self,
+        ui: &mut egui::Ui,
+        tx: &Sender<Msg>,
+        token: &Option<String>,
+        has_password: bool,
+    ) {
+        ui.label(
+            egui::RichText::new(
+                "La suppression du compte conserve l'historique financier sur le serveur.",
+            )
+            .color(MUTED)
+            .size(11.0),
+        );
+        if self.account_confirm_delete {
+            ui.add_space(6.0);
+            ui.label(
+                egui::RichText::new("Confirmez la suppression définitive de votre compte ?")
+                    .color(RED)
+                    .size(12.0)
+                    .strong(),
+            );
+            ui.add_space(6.0);
+            if has_password {
+                Self::form_field(
+                    ui,
+                    "Mot de passe",
+                    &mut self.account_delete_input,
+                    "",
+                    true,
+                );
+            } else {
+                Self::form_field(
+                    ui,
+                    "Saisissez SUPPRIMER pour confirmer",
+                    &mut self.account_delete_input,
+                    "SUPPRIMER",
+                    false,
+                );
+            }
+            ui.add_space(8.0);
+            ui.horizontal_wrapped(|ui| {
+                let ready = if has_password {
+                    !self.account_delete_input.is_empty()
+                } else {
+                    self.account_delete_input.trim() == "SUPPRIMER"
+                };
+                ui.add_enabled_ui(!self.busy && ready, |ui| {
+                    if btn_danger(ui, "Confirmer la suppression").clicked() {
+                        if let Some(t) = token.clone() {
+                            let value = if has_password {
+                                serde_json::json!({ "password": self.account_delete_input.clone() })
+                            } else {
+                                serde_json::json!({ "confirm": self.account_delete_input.trim() })
+                            };
+                            delete_account(tx.clone(), t, value);
+                        }
+                        self.account_delete_input.clear();
+                        self.account_confirm_delete = false;
+                    }
+                });
+                if btn_ghost(ui, "Annuler").clicked() {
+                    self.account_delete_input.clear();
+                    self.account_confirm_delete = false;
+                }
+            });
+        } else if btn_danger(ui, "Supprimer mon compte").clicked() {
+            self.account_confirm_delete = true;
+        }
+    }
+
+    /// Modale « Gérer le compte » : 4 sous-catégories, une seule visible à la fois.
+    /// Fond bloquant + Area centrée, largeur calculée depuis la fenêtre (pas de fixe).
     fn draw_account_modal(&mut self, ctx: &egui::Context) {
         let screen = ctx.screen_rect();
         egui::Area::new(egui::Id::new("account_blocker"))
@@ -4594,7 +5516,7 @@ impl ShopApp {
             });
 
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-            self.account_modal = false;
+            self.close_account_modal();
             return;
         }
 
@@ -4603,6 +5525,11 @@ impl ShopApp {
             .as_ref()
             .map(|a| a.has_password)
             .unwrap_or(false);
+        let two_factor_enabled = self
+            .account
+            .as_ref()
+            .map(|a| a.two_factor_enabled)
+            .unwrap_or(false);
         let identities = self
             .account
             .as_ref()
@@ -4610,177 +5537,82 @@ impl ShopApp {
             .unwrap_or_default();
         let tx = self.tx.clone();
         let token = self.token.clone();
+        let width = (screen.width() - 48.0).min(560.0).max(240.0);
+        let max_height = (screen.height() - 80.0).max(200.0);
 
         egui::Area::new(egui::Id::new("account_modal"))
-            .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+            .constrain_to(screen.shrink(8.0))
             .show(ctx, |ui| {
+                ui.set_width(width);
                 egui::Frame::new()
                     .fill(SURFACE)
                     .corner_radius(egui::CornerRadius::same(18))
-                    .inner_margin(egui::Margin::same(22))
+                    .inner_margin(egui::Margin::same(20))
                     .stroke(egui::Stroke::new(1.0_f32, ORANGE))
                     .show(ui, |ui| {
-                        ui.set_min_width(380.0);
-                        ui.set_max_width(520.0);
-                        ui.horizontal(|ui| {
+                        ui.horizontal_wrapped(|ui| {
                             ui.label(
                                 egui::RichText::new("Mon compte")
                                     .size(19.0)
                                     .strong()
                                     .color(TEXT),
                             );
-                            ui.with_layout(
-                                egui::Layout::right_to_left(egui::Align::Center),
-                                |ui| {
-                                    if btn_ghost(ui, "Fermer").clicked() {
-                                        self.account_modal = false;
-                                    }
-                                },
+                            if btn_ghost(ui, "Fermer").clicked() {
+                                self.close_account_modal();
+                            }
+                        });
+                        ui.add_space(8.0);
+
+                        // Onglets : se replient sur petite fenêtre.
+                        ui.horizontal_wrapped(|ui| {
+                            ui.selectable_value(
+                                &mut self.account_tab,
+                                AccountTab::Informations,
+                                "Informations",
+                            );
+                            ui.selectable_value(
+                                &mut self.account_tab,
+                                AccountTab::Securite,
+                                "Sécurité",
+                            );
+                            ui.selectable_value(
+                                &mut self.account_tab,
+                                AccountTab::Connexions,
+                                "Connexions",
+                            );
+                            ui.selectable_value(
+                                &mut self.account_tab,
+                                AccountTab::Danger,
+                                "Danger",
                             );
                         });
                         ui.add_space(10.0);
 
                         egui::ScrollArea::vertical()
-                            .max_height((screen.height() * 0.8).max(200.0))
+                            .id_salt("account_modal_content")
+                            .max_height(max_height)
+                            .auto_shrink([false, false])
                             .show(ui, |ui| {
-                                ui.label(egui::RichText::new("Email").color(MUTED).size(12.0));
-                                ui.add(
-                                    egui::TextEdit::singleline(&mut self.account_email)
-                                        .desired_width(f32::INFINITY)
-                                        .hint_text("vous@exemple.com")
-                                        .margin(egui::Margin::same(10)),
-                                );
-                                ui.add_space(6.0);
-                                ui.label(
-                                    egui::RichText::new("Téléphone").color(MUTED).size(12.0),
-                                );
-                                ui.add(
-                                    egui::TextEdit::singleline(&mut self.account_phone)
-                                        .desired_width(f32::INFINITY)
-                                        .hint_text("Utilisé pour vos commandes")
-                                        .margin(egui::Margin::same(10)),
-                                );
-                                ui.add_space(6.0);
-                                ui.label(
-                                    egui::RichText::new(format!(
-                                        "Mot de passe : {}",
-                                        if has_password { "défini" } else { "non défini" }
-                                    ))
-                                    .color(MUTED)
-                                    .size(12.0),
-                                );
-                                ui.add_space(8.0);
-                                ui.horizontal(|ui| {
-                                    let email = self.account_email.trim().to_string();
-                                    let phone = self.account_phone.trim().to_string();
-                                    if btn_primary(ui, "Enregistrer").clicked() {
-                                        if let Some(t) = token.clone() {
-                                            update_account(tx.clone(), t, email, phone);
-                                        }
+                                // Le contenu occupe exactement la largeur disponible.
+                                ui.set_width(ui.available_width());
+                                match self.account_tab {
+                                    AccountTab::Informations => {
+                                        self.account_tab_infos(ui, &tx, &token)
                                     }
-                                    if btn_ghost(ui, "Rafraîchir").clicked() {
-                                        if let Some(t) = token.clone() {
-                                            fetch_account(tx.clone(), t);
-                                        }
+                                    AccountTab::Securite => self.account_tab_security(
+                                        ui,
+                                        &tx,
+                                        &token,
+                                        has_password,
+                                        two_factor_enabled,
+                                    ),
+                                    AccountTab::Connexions => self.account_tab_connections(
+                                        ui, &tx, &token, &identities,
+                                    ),
+                                    AccountTab::Danger => {
+                                        self.account_tab_danger(ui, &tx, &token, has_password)
                                     }
-                                });
-
-                                ui.add_space(12.0);
-                                ui.label(
-                                    egui::RichText::new("Connexions liées")
-                                        .strong()
-                                        .size(13.0)
-                                        .color(TEXT),
-                                );
-                                if identities.is_empty() {
-                                    ui.label(
-                                        egui::RichText::new("Aucune identité liée.")
-                                            .color(MUTED)
-                                            .size(12.0),
-                                    );
-                                }
-                                for identity in &identities {
-                                    ui.add_space(4.0);
-                                    ui.horizontal(|ui| {
-                                        ui.label(
-                                            egui::RichText::new(&identity.provider)
-                                                .strong()
-                                                .size(12.0)
-                                                .color(TEXT),
-                                        );
-                                        if let Some(email) =
-                                            identity.email.as_ref().filter(|e| !e.is_empty())
-                                        {
-                                            ui.label(
-                                                egui::RichText::new(email).color(MUTED).size(11.0),
-                                            );
-                                        }
-                                        if let Some(date) = &identity.created_at {
-                                            let day: String = date.chars().take(10).collect();
-                                            ui.label(
-                                                egui::RichText::new(day).color(MUTED).size(10.0),
-                                            );
-                                        }
-                                        ui.with_layout(
-                                            egui::Layout::right_to_left(egui::Align::Center),
-                                            |ui| {
-                                                let provider = identity.provider.clone();
-                                                if btn_ghost(ui, "Dissocier").clicked() {
-                                                    if let Some(t) = token.clone() {
-                                                        unlink_account(tx.clone(), t, provider);
-                                                    }
-                                                }
-                                            },
-                                        );
-                                    });
-                                }
-                                ui.add_space(8.0);
-                                ui.horizontal_wrapped(|ui| {
-                                    for (provider, label) in
-                                        [("github", "Lier GitHub"), ("google", "Lier Google")]
-                                    {
-                                        if identities.iter().any(|i| i.provider == provider) {
-                                            continue;
-                                        }
-                                        if btn_ghost(ui, label).clicked() {
-                                            if let Some(t) = token.clone() {
-                                                link_account(tx.clone(), t, provider);
-                                            }
-                                        }
-                                    }
-                                });
-
-                                ui.add_space(12.0);
-                                ui.label(
-                                    egui::RichText::new(
-                                        "La suppression du compte conserve l'historique financier sur le serveur.",
-                                    )
-                                    .color(MUTED)
-                                    .size(11.0),
-                                );
-                                if self.account_confirm_delete {
-                                    ui.add_space(6.0);
-                                    ui.label(
-                                        egui::RichText::new(
-                                            "Confirmez la suppression définitive de votre compte ?",
-                                        )
-                                        .color(RED)
-                                        .size(12.0)
-                                        .strong(),
-                                    );
-                                    ui.horizontal(|ui| {
-                                        if btn_danger(ui, "Confirmer la suppression").clicked() {
-                                            if let Some(t) = token.clone() {
-                                                delete_account(tx.clone(), t);
-                                            }
-                                            self.account_confirm_delete = false;
-                                        }
-                                        if btn_ghost(ui, "Annuler").clicked() {
-                                            self.account_confirm_delete = false;
-                                        }
-                                    });
-                                } else if btn_danger(ui, "Supprimer mon compte").clicked() {
-                                    self.account_confirm_delete = true;
                                 }
                             });
                     });

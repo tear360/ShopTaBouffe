@@ -22,12 +22,63 @@ export function getJwtSecret() {
   return cachedSecret;
 }
 
-/** JWT HS256, 30 jours : { sub, role, name }. */
+/** Hash d'un mot de passe (scrypt + sel). Format : "salt:hash" (hex). */
+export function hashPassword(password) {
+  const salt = crypto.randomBytes(16).toString('hex');
+  const hash = crypto.scryptSync(password, salt, 64).toString('hex');
+  return `${salt}:${hash}`;
+}
+
+/** Vérifie un mot de passe contre un hash stocké (comparaison constante). */
+export function verifyPassword(password, stored) {
+  if (!stored || typeof stored !== 'string' || !stored.includes(':')) return false;
+  const [salt, hash] = stored.split(':');
+  if (!salt || !hash) return false;
+  try {
+    const computed = crypto.scryptSync(password, salt, 64).toString('hex');
+    const a = Buffer.from(computed, 'hex');
+    const b = Buffer.from(hash, 'hex');
+    if (a.length !== b.length) return false;
+    return crypto.timingSafeEqual(a, b);
+  } catch {
+    return false;
+  }
+}
+
+/** JWT HS256, 30 jours : { sub, role, name, ver }. */
 export function signToken(user) {
-  return jwt.sign({ sub: user.id, role: user.role, name: user.name }, getJwtSecret(), {
+  return jwt.sign(
+    { sub: user.id, role: user.role, name: user.name, ver: user.token_version || 0 },
+    getJwtSecret(),
+    { algorithm: 'HS256', expiresIn: '30d' }
+  );
+}
+
+/** Jeton de challenge 2FA : 5 minutes, usage unique côté logique d'échange. */
+export function signTwoFactorChallenge(user) {
+  return jwt.sign({ sub: user.id, purpose: '2fa', ver: user.token_version || 0 }, getJwtSecret(), {
     algorithm: 'HS256',
-    expiresIn: '30d',
+    expiresIn: '5m',
   });
+}
+
+/** Vérifie un challenge 2FA et renvoie l'utilisateur, ou null. */
+export function userFromTwoFactorChallenge(token) {
+  if (typeof token !== 'string' || !token) return null;
+  try {
+    const payload = jwt.verify(token, getJwtSecret(), { algorithms: ['HS256'] });
+    if (payload.purpose !== '2fa') return null;
+    const user = db.prepare('SELECT * FROM users WHERE id = ?').get(payload.sub);
+    if (!user || (payload.ver || 0) !== (user.token_version || 0)) return null;
+    return user;
+  } catch {
+    return null;
+  }
+}
+
+/** Invalide tous les JWT déjà émis pour cet utilisateur. */
+export function revokeTokens(userId) {
+  db.prepare('UPDATE users SET token_version = COALESCE(token_version, 0) + 1 WHERE id = ?').run(userId);
 }
 
 /** Middleware : exige Authorization: Bearer <JWT> (charge req.user fraîchement en DB). */
@@ -43,6 +94,10 @@ export function requireAuth(req, res, next) {
   }
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(payload.sub);
   if (!user) return res.status(401).json({ error: 'Utilisateur introuvable' });
+  // Un changement / reset de mot de passe invalide les anciens tokens.
+  if ((payload.ver || 0) !== (user.token_version || 0)) {
+    return res.status(401).json({ error: 'Session expirée, veuillez vous reconnecter' });
+  }
   // Sécurité : pour les comptes démo (par nom), le statut fournisseur est
   // lié à la session (token), pas au compte → pas de propagation entre appareils.
   if (user.provider === 'demo') {
@@ -59,7 +114,9 @@ export function userFromToken(token) {
   if (typeof token !== 'string' || !token) return null;
   try {
     const payload = jwt.verify(token, getJwtSecret(), { algorithms: ['HS256'] });
-    return db.prepare('SELECT * FROM users WHERE id = ?').get(payload.sub) || null;
+    const user = db.prepare('SELECT * FROM users WHERE id = ?').get(payload.sub);
+    if (!user || (payload.ver || 0) !== (user.token_version || 0)) return null;
+    return user;
   } catch {
     return null;
   }

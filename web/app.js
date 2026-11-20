@@ -103,12 +103,22 @@ const state = {
   finFrom: '', finTo: '',
   // divers
   loading: false, error: null, notice: null,
-  loginError: null, loginName: '', loggingIn: false,
+  loginError: null, loginNotice: null, loginName: '', loggingIn: false,
   loginMode: 'login', loginUsername: '', loginPassword: '',
   regName: '', regUsername: '', regPassword: '', regBusy: false, regError: null,
+  // mot de passe oublié / réinitialisation
+  forgotEmail: '', forgotBusy: false, forgotDone: false,
+  resetToken: '', resetValid: null, resetPassword: '', resetConfirm: '', resetBusy: false,
+  // double authentification à la connexion
+  challengeToken: '', twofaCode: '', twofaRecovery: '', twofaBusy: false,
   upgradeModal: false, upgradeName: '', upgradeUsername: '', upgradePassword: '', upgradeBusy: false, upgradeError: null,
   // compte
-  account: null, accountBusy: false, accountError: null,
+  account: null, accountBusy: false, accountError: null, accountNotice: null,
+  accountTab: 'info',
+  passwordForm: { current: '', next: '', confirm: '' }, passwordBusy: false,
+  twofaSetup: null, twofaSetupCode: '', twofaSetupBusy: false,
+  twofaRecoveryCodes: [], twofaDisableCode: '', twofaDisablePassword: '', twofaDisableBusy: false,
+  deletePassword: '', deleteConfirm: '', deleteBusy: false,
   socket: null, joinedConv: null,
 };
 
@@ -259,7 +269,9 @@ function loginErrorFromUrl() {
 
 function render() {
   const app = $('#app');
-  if (!state.token || !state.user) {
+  const authScreen = state.loginMode === 'forgot' || state.loginMode === 'reset'
+    || state.loginMode === 'twofa';
+  if (!state.token || !state.user || authScreen) {
     app.innerHTML = viewLogin() + (state.upgradeModal ? viewUpgradeModal() : '');
     return;
   }
@@ -273,17 +285,14 @@ function viewLogin() {
   const err = state.error || state.loginError;
   const isLogin = state.loginMode === 'login';
   const isRegister = state.loginMode === 'register';
-  return `
-  <div class="login-wrap">
-    <div class="login-card">
-      <div class="login-logo">${ICONS.bag}</div>
-      <h1>ShopTaBouffe</h1>
-      ${err ? `<div class="login-error">${h(err)}</div>` : ''}
-      <div class="auth-tabs">
-        <button class="btn btn-ghost btn-sm ${isLogin ? 'active' : ''}" data-action="auth-mode" data-mode="login">Se connecter</button>
-        <button class="btn btn-ghost btn-sm ${isRegister ? 'active' : ''}" data-action="auth-mode" data-mode="register">S'inscrire</button>
-      </div>
-      ${isLogin ? `
+  const isForgot = state.loginMode === 'forgot';
+  const isReset = state.loginMode === 'reset';
+  const isTwofa = state.loginMode === 'twofa';
+  const backLogin = `<button class="btn btn-ghost" type="button" data-action="auth-mode" data-mode="login">Retour à la connexion</button>`;
+
+  let content = '';
+  if (isLogin) {
+    content = `
       <form id="login-form">
         <div class="field">
           <label for="login-username">Nom d'utilisateur</label>
@@ -295,11 +304,13 @@ function viewLogin() {
           <input id="login-password" name="password" type="password" maxlength="128" autocomplete="current-password"
                  placeholder="••••••" value="${h(state.loginPassword)}" required />
         </div>
+        <button class="forgot" type="button" data-action="auth-mode" data-mode="forgot">Mot de passe oublié ?</button>
         <button class="btn" type="submit" ${state.loggingIn ? 'disabled' : ''}>
           ${state.loggingIn ? 'Connexion…' : 'Se connecter'}
         </button>
-      </form>` : ''}
-      ${isRegister ? `
+      </form>`;
+  } else if (isRegister) {
+    content = `
       <form id="register-form">
         <div class="field">
           <label for="reg-name">Votre nom</label>
@@ -319,7 +330,87 @@ function viewLogin() {
         <button class="btn" type="submit" ${state.regBusy ? 'disabled' : ''}>
           ${state.regBusy ? 'Création…' : 'Créer mon compte'}
         </button>
-      </form>` : ''}
+      </form>`;
+  } else if (isForgot) {
+    content = `
+      <h2 class="auth-title">Mot de passe oublié ?</h2>
+      ${state.forgotDone ? `
+        <p class="login-card-text">Si cette adresse est associée à un compte, un lien de réinitialisation a été envoyé. Vérifiez votre boîte mail.</p>
+        ${backLogin}` : `
+        <p class="login-card-text">Saisissez votre adresse e-mail. Nous vous enverrons un lien pour choisir un nouveau mot de passe.</p>
+        <form id="forgot-form">
+          <div class="field">
+            <label for="forgot-email">Adresse e-mail</label>
+            <input id="forgot-email" name="email" type="email" maxlength="180" autocomplete="email"
+                   placeholder="vous@exemple.com" value="${h(state.forgotEmail)}" required />
+          </div>
+          <button class="btn" type="submit" ${state.forgotBusy ? 'disabled' : ''}>
+            ${state.forgotBusy ? 'Envoi…' : 'Envoyer le lien'}
+          </button>
+        </form>
+        ${backLogin}`}`;
+  } else if (isReset) {
+    content = `
+      <h2 class="auth-title">Nouveau mot de passe</h2>
+      ${state.resetValid === null ? `
+        <p class="login-card-text">Vérification du lien en cours…</p>` : ''}
+      ${state.resetValid === false ? `
+        <p class="login-card-text">Ce lien de réinitialisation n’est pas valide ou a expiré. Vous pouvez demander un nouveau lien.</p>
+        <div class="auth-stack">
+          <button class="btn" type="button" data-action="auth-mode" data-mode="forgot">Demander un nouveau lien</button>
+          ${backLogin}
+        </div>` : ''}
+      ${state.resetValid === true ? `
+        <form id="reset-form">
+          <div class="field">
+            <label for="reset-password">Nouveau mot de passe</label>
+            <input id="reset-password" name="password" type="password" maxlength="128" autocomplete="new-password"
+                   minlength="6" placeholder="6 caractères minimum" value="${h(state.resetPassword)}" required />
+          </div>
+          <div class="field">
+            <label for="reset-confirm">Confirmer le mot de passe</label>
+            <input id="reset-confirm" name="confirm" type="password" maxlength="128" autocomplete="new-password"
+                   placeholder="Répétez le mot de passe" value="${h(state.resetConfirm)}" required />
+          </div>
+          <button class="btn" type="submit" ${state.resetBusy ? 'disabled' : ''}>
+            ${state.resetBusy ? 'Enregistrement…' : 'Enregistrer le nouveau mot de passe'}
+          </button>
+        </form>` : ''}`;
+  } else if (isTwofa) {
+    content = `
+      <h2 class="auth-title">Double authentification</h2>
+      <p class="login-card-text">Un code est requis pour terminer la connexion. Utilisez le code de votre application d’authentification ou l’un de vos codes de récupération.</p>
+      <form id="twofa-form">
+        <div class="field">
+          <label for="twofa-code">Code d'authentification</label>
+          <input id="twofa-code" name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="12"
+                 placeholder="123456" value="${h(state.twofaCode)}" />
+        </div>
+        <div class="field">
+          <label for="twofa-recovery">Code de récupération</label>
+          <input id="twofa-recovery" name="recoveryCode" maxlength="32" autocomplete="off"
+                 placeholder="XXXX-XXXX-XXXX" value="${h(state.twofaRecovery)}" />
+        </div>
+        <button class="btn" type="submit" ${state.twofaBusy ? 'disabled' : ''}>
+          ${state.twofaBusy ? 'Vérification…' : 'Vérifier le code'}
+        </button>
+      </form>
+      <button class="btn btn-ghost" type="button" data-action="auth-mode" data-mode="login">Annuler</button>`;
+  }
+
+  return `
+  <div class="login-wrap">
+    <div class="login-card">
+      <div class="login-logo">${ICONS.bag}</div>
+      <h1>ShopTaBouffe</h1>
+      ${err ? `<div class="login-error">${h(err)}</div>` : ''}
+      ${state.loginNotice ? `<div class="info-box">${h(state.loginNotice)}</div>` : ''}
+      ${isLogin || isRegister ? `
+      <div class="auth-tabs">
+        <button class="btn btn-ghost btn-sm ${isLogin ? 'active' : ''}" data-action="auth-mode" data-mode="login">Se connecter</button>
+        <button class="btn btn-ghost btn-sm ${isRegister ? 'active' : ''}" data-action="auth-mode" data-mode="register">S'inscrire</button>
+      </div>` : ''}
+      ${content}
       ${isLogin || isRegister ? `
       <div class="divider">ou continuer avec</div>
       <a class="btn btn-provider google" href="/api/auth/start?provider=google&target=web">${LOGO_GOOGLE} Continuer avec Google</a>
@@ -769,10 +860,153 @@ function viewChatThread() {
 
 /* ---------------- Modale « Gérer le compte » ---------------- */
 
-function accountModalHtml() {
-  const acc = state.account || {
-    email: '', phone: '', identities: [], hasPassword: false,
-  };
+const ACCOUNT_TABS = [
+  ['info', 'Informations'],
+  ['security', 'Sécurité'],
+  ['connections', 'Connexions'],
+  ['danger', 'Danger'],
+];
+
+function accountInfoHtml(acc) {
+  return `
+    <form id="account-form">
+      <div class="field">
+        <label for="acc-email">Adresse e-mail (optionnel)</label>
+        <input id="acc-email" name="email" type="email" maxlength="180"
+               placeholder="vous@exemple.com" value="${h(acc.email || '')}" />
+        <span class="field-hint">Laissez vide si vous ne souhaitez pas renseigner d’adresse.</span>
+      </div>
+      <div class="field">
+        <label for="acc-phone">Numéro de téléphone</label>
+        <input id="acc-phone" name="phone" maxlength="30" inputmode="tel"
+               placeholder="0612345678" value="${h(acc.phone || '')}" />
+        <span class="field-hint">Pré-rempli automatiquement lors de vos commandes.</span>
+      </div>
+      ${state.accountError ? `<div class="error-box">${h(state.accountError)}</div>` : ''}
+      ${state.accountNotice ? `<div class="info-box">${h(state.accountNotice)}</div>` : ''}
+      <button class="btn" type="submit" ${state.accountBusy ? 'disabled' : ''}>
+        ${state.accountBusy ? 'Enregistrement…' : 'Enregistrer'}
+      </button>
+    </form>`;
+}
+
+function accountPasswordHtml(acc) {
+  if (!acc.hasPassword) {
+    return `<p class="login-card-text">Votre compte n’a pas de mot de passe (connexion via GitHub ou Google). La double authentification reste disponible ci-dessous.</p>`;
+  }
+  const f = state.passwordForm || {};
+  return `
+    <form id="account-password-form">
+      <div class="field">
+        <label for="acc-cur-pwd">Mot de passe actuel</label>
+        <input id="acc-cur-pwd" name="currentPassword" type="password" maxlength="128"
+               autocomplete="current-password" placeholder="Votre mot de passe actuel"
+               value="${h(f.current || '')}" required />
+      </div>
+      <div class="field">
+        <label for="acc-new-pwd">Nouveau mot de passe</label>
+        <input id="acc-new-pwd" name="newPassword" type="password" maxlength="128"
+               autocomplete="new-password" minlength="6" placeholder="6 caractères minimum"
+               value="${h(f.next || '')}" required />
+      </div>
+      <div class="field">
+        <label for="acc-confirm-pwd">Confirmer le nouveau mot de passe</label>
+        <input id="acc-confirm-pwd" name="confirmPassword" type="password" maxlength="128"
+               autocomplete="new-password" placeholder="Répétez le nouveau mot de passe"
+               value="${h(f.confirm || '')}" required />
+      </div>
+      <button class="btn" type="submit" ${state.passwordBusy ? 'disabled' : ''}>
+        ${state.passwordBusy ? 'Modification…' : 'Changer le mot de passe'}
+      </button>
+    </form>`;
+}
+
+function accountTwofaHtml(acc) {
+  const enabled = !!acc.twoFactorEnabled;
+  const codes = state.twofaRecoveryCodes || [];
+  let controls;
+  if (enabled) {
+    controls = `
+      <form id="2fa-disable-form">
+        <div class="field">
+          <label for="acc-2fa-disable-code">Code d'authentification</label>
+          <input id="acc-2fa-disable-code" name="code" inputmode="numeric" autocomplete="one-time-code"
+                 maxlength="6" placeholder="123456" value="${h(state.twofaDisableCode)}" required />
+        </div>
+        ${acc.hasPassword ? `
+        <div class="field">
+          <label for="acc-2fa-disable-pwd">Mot de passe</label>
+          <input id="acc-2fa-disable-pwd" name="password" type="password" maxlength="128"
+                 autocomplete="current-password" placeholder="Votre mot de passe"
+                 value="${h(state.twofaDisablePassword)}" required />
+        </div>` : ''}
+        <button class="btn btn-danger" type="submit" ${state.twofaDisableBusy ? 'disabled' : ''}>
+          ${state.twofaDisableBusy ? 'Désactivation…' : 'Désactiver la double authentification'}
+        </button>
+      </form>`;
+  } else if (state.twofaSetup) {
+    controls = `
+      <p class="login-card-text">Scannez ce QR code avec votre application d’authentification, ou saisissez la clé secrète manuellement.</p>
+      ${state.twofaSetup.qrDataUrl ? `<img class="twofa-qr" src="${h(state.twofaSetup.qrDataUrl)}" alt="QR code de configuration de la double authentification" />` : ''}
+      <div class="field">
+        <label>Clé secrète (saisie manuelle)</label>
+        <code class="twofa-secret">${h(state.twofaSetup.secret || '')}</code>
+        <span class="field-hint">À copier dans votre application si le QR code ne peut pas être scanné.</span>
+      </div>
+      <form id="2fa-enable-form">
+        <div class="field">
+          <label for="acc-2fa-enable-code">Code à 6 chiffres</label>
+          <input id="acc-2fa-enable-code" name="code" inputmode="numeric" autocomplete="one-time-code"
+                 maxlength="6" placeholder="123456" value="${h(state.twofaSetupCode)}" required />
+        </div>
+        <div class="actions">
+          <button class="btn" type="submit" ${state.twofaSetupBusy ? 'disabled' : ''}>
+            ${state.twofaSetupBusy ? 'Activation…' : 'Activer'}
+          </button>
+          <button class="btn btn-ghost" type="button" data-action="2fa-setup-cancel"
+                  ${state.twofaSetupBusy ? 'disabled' : ''}>Annuler</button>
+        </div>
+      </form>`;
+  } else {
+    controls = `
+      <button class="btn btn-ghost" type="button" data-action="2fa-start" ${state.twofaSetupBusy ? 'disabled' : ''}>
+        ${state.twofaSetupBusy ? 'Préparation…' : 'Configurer la double authentification'}
+      </button>`;
+  }
+  return `
+    <div class="account-subsection">
+      <h4>Double authentification</h4>
+      <div class="setting-row">
+        <span class="ic">${ICONS.lock}</span>
+        <div class="info">
+          <div class="t">État</div>
+          <div class="s">${enabled
+            ? 'Un code est demandé à chaque connexion par mot de passe.'
+            : 'Protégez votre compte avec une application d’authentification (TOTP).'}</div>
+        </div>
+        <span class="pill ${enabled ? 'on' : ''}">${enabled ? 'Activée' : 'Désactivée'}</span>
+      </div>
+      ${codes.length ? `
+      <div class="recovery-box">
+        <div class="recovery-title">${ICONS.warn} Codes de récupération — à conserver précieusement</div>
+        <p class="login-card-text">Ces codes ne seront affichés qu’<strong>une seule fois</strong>. Notez-les et conservez-les dans un endroit sûr : ils permettent de se reconnecter si vous perdez votre application d’authentification.</p>
+        <div class="recovery-codes">${codes.map((c) => `<code>${h(c)}</code>`).join('')}</div>
+        <button class="btn btn-ghost btn-sm" type="button" data-action="2fa-recovery-done">J’ai conservé ces codes</button>
+      </div>` : ''}
+      ${controls}
+    </div>`;
+}
+
+function accountSecurityHtml(acc) {
+  return `
+    <div class="account-subsection">
+      <h4>Changer le mot de passe</h4>
+      ${accountPasswordHtml(acc)}
+    </div>
+    ${accountTwofaHtml(acc)}`;
+}
+
+function accountConnectionsHtml(acc) {
   const canUnlink = (item) =>
     acc.identities.some((i) => i.provider !== item.provider) ||
     (item.provider !== 'local' && acc.hasPassword);
@@ -780,55 +1014,71 @@ function accountModalHtml() {
     (p) => !acc.identities.some((i) => i.provider === p)
   );
   return `
+    <h4>Moyens de connexion</h4>
+    ${acc.identities.length === 0
+      ? `<div class="login-card-text">Chargement…</div>`
+      : acc.identities.map((i) => `
+        <div class="setting-row">
+          <span class="ic">${i.provider === 'github' ? LOGO_GITHUB : i.provider === 'google' ? LOGO_GOOGLE : ''}</span>
+          <div class="info">
+            <div class="t">${h(PROVIDER_LABELS[i.provider] || i.provider)}</div>
+            <div class="s">${i.provider === 'local' ? 'Connexion par nom d’utilisateur et mot de passe' : h(i.email || 'Identité liée')}</div>
+          </div>
+          <button class="btn btn-ghost btn-sm" type="button" data-action="account-unlink" data-provider="${h(i.provider)}"
+                  ${canUnlink(i) ? '' : 'disabled title="Ajoutez un autre moyen de connexion avant de dissocier"'}>Dissocier</button>
+        </div>`).join('')}
+    ${oauthButtons.length ? `
+      <div class="account-links">
+        ${oauthButtons.map((p) => `
+          <button class="btn btn-ghost btn-sm" type="button" data-action="account-link" data-provider="${p}">
+            ${p === 'github' ? LOGO_GITHUB : LOGO_GOOGLE} Lier ${PROVIDER_LABELS[p]}
+          </button>`).join('')}
+      </div>` : `<div class="login-card-text">GitHub et Google sont tous deux liés à ce compte.</div>`}`;
+}
+
+function accountDangerHtml(acc) {
+  const withPassword = !!acc.hasPassword;
+  return `
+    <div class="account-subsection danger-zone">
+      <h4>Supprimer mon compte</h4>
+      <p class="login-card-text">Cette action est définitive : vos commandes, messages et identités seront effacés. L’argent rapporté dans les finances est conservé.</p>
+      <form id="account-delete-form">
+        <div class="field">
+          <label for="acc-delete-value">${withPassword ? 'Mot de passe' : 'Confirmation'}</label>
+          <input id="acc-delete-value" name="value" type="${withPassword ? 'password' : 'text'}"
+                 maxlength="128" autocomplete="${withPassword ? 'current-password' : 'off'}"
+                 placeholder="${withPassword ? 'Votre mot de passe' : 'Saisissez SUPPRIMER'}"
+                 value="${h(withPassword ? state.deletePassword : state.deleteConfirm)}" required />
+          ${withPassword ? '' : '<span class="field-hint">Saisissez exactement SUPPRIMER (en majuscules).</span>'}
+        </div>
+        <button class="btn btn-danger" type="submit" ${state.deleteBusy ? 'disabled' : ''}>
+          ${state.deleteBusy ? 'Suppression…' : 'Supprimer définitivement mon compte'}
+        </button>
+      </form>
+    </div>`;
+}
+
+function accountModalHtml() {
+  const acc = state.account || {
+    email: '', phone: '', identities: [], hasPassword: false, twoFactorEnabled: false,
+  };
+  const tab = ACCOUNT_TABS.some(([id]) => id === state.accountTab) ? state.accountTab : 'info';
+  let section = '';
+  if (tab === 'info') section = accountInfoHtml(acc);
+  else if (tab === 'security') section = accountSecurityHtml(acc);
+  else if (tab === 'connections') section = accountConnectionsHtml(acc);
+  else section = accountDangerHtml(acc);
+  return `
     <div class="modal" role="dialog" aria-modal="true" aria-label="Gérer le compte">
       <h3>Gérer le compte</h3>
-      <form id="account-form">
-        <div class="field">
-          <label for="acc-email">Adresse e-mail (optionnel)</label>
-          <input id="acc-email" name="email" type="email" maxlength="180"
-                 placeholder="vous@exemple.com" value="${h(acc.email || '')}" />
-          <span class="field-hint">Laissez vide si vous ne souhaitez pas renseigner d’adresse.</span>
-        </div>
-        <div class="field">
-          <label for="acc-phone">Numéro de téléphone</label>
-          <input id="acc-phone" name="phone" maxlength="30" inputmode="tel"
-                 placeholder="0612345678" value="${h(acc.phone || '')}" />
-          <span class="field-hint">Pré-rempli automatiquement lors de vos commandes.</span>
-        </div>
-        ${state.accountError ? `<div class="error-box">${h(state.accountError)}</div>` : ''}
-        <button class="btn" type="submit" ${state.accountBusy ? 'disabled' : ''}>Enregistrer les informations</button>
-      </form>
-
-      <h4 style="margin:22px 0 10px;font-size:14px">Moyens de connexion</h4>
-      ${acc.identities.length === 0
-        ? `<div style="color:var(--muted);font-size:13px">Chargement…</div>`
-        : acc.identities.map((i) => `
-          <div class="setting-row">
-            <span class="ic">${i.provider === 'github' ? LOGO_GITHUB : i.provider === 'google' ? LOGO_GOOGLE : ''}</span>
-            <div class="info">
-              <div class="t">${h(PROVIDER_LABELS[i.provider] || i.provider)}</div>
-              <div class="s">${i.provider === 'local' ? 'Connexion par nom d’utilisateur et mot de passe' : h(i.email || 'Identité liée')}</div>
-            </div>
-            <button class="btn btn-ghost btn-sm" type="button" data-action="account-unlink" data-provider="${h(i.provider)}"
-                    ${canUnlink(i) ? '' : 'disabled title="Ajoutez un autre moyen de connexion avant de dissocier"'}>Dissocier</button>
-          </div>`).join('')}
-      ${oauthButtons.length ? `
-        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
-          ${oauthButtons.map((p) => `
-            <button class="btn btn-ghost btn-sm" type="button" data-action="account-link" data-provider="${p}">
-              ${p === 'github' ? LOGO_GITHUB : LOGO_GOOGLE} Lier ${PROVIDER_LABELS[p]}
-            </button>`).join('')}
-        </div>` : `<div style="color:var(--muted);font-size:12.5px;margin-top:10px">GitHub et Google sont tous deux liés à ce compte.</div>`}
-
-      <div class="setting-row" style="margin-top:18px;border-top:1px solid var(--border);padding-top:16px">
-        <span class="ic"></span>
-        <div class="info">
-          <div class="t" style="color:var(--red)">Supprimer mon compte</div>
-          <div class="s">Efface vos commandes, messages et identités. L’argent rapporté dans les finances est conservé.</div>
-        </div>
-        <button class="btn btn-danger btn-sm" type="button" data-action="account-delete">Supprimer</button>
+      <div class="account-tabs" role="tablist" aria-label="Catégories du compte">
+        ${ACCOUNT_TABS.map(([id, label]) => `
+          <button class="account-tab ${tab === id ? 'active' : ''}" type="button" role="tab"
+                  aria-selected="${tab === id}" data-action="account-tab" data-tab="${id}">${label}</button>`).join('')}
       </div>
-
+      ${state.accountError && tab !== 'info' ? `<div class="error-box">${h(state.accountError)}</div>` : ''}
+      ${state.accountNotice && tab !== 'info' ? `<div class="info-box">${h(state.accountNotice)}</div>` : ''}
+      <div class="account-panel" role="tabpanel">${section}</div>
       <div class="actions">
         <button class="btn btn-ghost" type="button" data-close>Fermer</button>
       </div>
@@ -848,13 +1098,15 @@ function openAccountModal() {
   backdrop.innerHTML = accountModalHtml();
   document.body.appendChild(backdrop);
   backdrop.addEventListener('click', (e) => {
-    if (e.target === backdrop || e.target.closest('[data-close]')) backdrop.remove();
+    if (e.target === backdrop || e.target.closest('[data-close]')) closeAccountModal();
   });
 }
 
 function closeAccountModal() {
   const backdrop = document.getElementById('account-modal');
   if (backdrop) backdrop.remove();
+  // Les codes de récupération ne doivent être visibles qu'une seule fois.
+  state.twofaRecoveryCodes = [];
 }
 
 /* ---------------- Profil ---------------- */
@@ -1892,6 +2144,17 @@ document.addEventListener('click', async (e) => {
       state.loginMode = el.dataset.mode;
       state.loginError = null;
       state.error = null;
+      if (state.loginMode !== 'twofa') {
+        state.challengeToken = '';
+        state.twofaCode = '';
+        state.twofaRecovery = '';
+        state.twofaBusy = false;
+      }
+      if (state.loginMode === 'forgot') {
+        state.forgotDone = false;
+        state.forgotBusy = false;
+      }
+      if (state.loginMode === 'reset' && !state.resetToken) state.resetValid = false;
       render();
     } else if (action === 'refresh') {
       await refresh();
@@ -1973,7 +2236,38 @@ document.addEventListener('click', async (e) => {
       }
     } else if (action === 'account-open') {
       await loadAccount();
+      state.accountTab = 'info';
+      state.accountError = null;
+      state.accountNotice = null;
       openAccountModal();
+    } else if (action === 'account-tab') {
+      state.accountTab = el.dataset.tab;
+      state.accountError = null;
+      state.accountNotice = null;
+      drawAccountModal();
+    } else if (action === '2fa-start') {
+      state.accountError = null;
+      state.twofaSetupBusy = true;
+      drawAccountModal();
+      try {
+        const data = await api('/account/2fa/start', { method: 'POST' });
+        state.twofaSetup = data || {};
+        state.twofaSetupCode = '';
+        toast('Scannez le QR code pour configurer la double authentification', 'ok');
+      } catch (err) {
+        state.accountError = err.message;
+      }
+      state.twofaSetupBusy = false;
+      drawAccountModal();
+    } else if (action === '2fa-setup-cancel') {
+      state.twofaSetup = null;
+      state.twofaSetupCode = '';
+      state.accountError = null;
+      drawAccountModal();
+    } else if (action === '2fa-recovery-done') {
+      state.twofaRecoveryCodes = [];
+      state.accountNotice = 'Double authentification activée.';
+      drawAccountModal();
     } else if (action === 'account-link') {
       const provider = el.dataset.provider;
       const data = await api('/account/link', { method: 'POST', body: { provider, target: 'web' } });
@@ -1987,12 +2281,6 @@ document.addEventListener('click', async (e) => {
       render();
       drawAccountModal();
       toast('Identité dissociée', 'ok');
-    } else if (action === 'account-delete') {
-      if (!confirm('SUPPRIMER DÉFINITIVEMENT votre compte ?Vos commandes, messages et identités seront effacés. L’argent rapporté dans les finances sera conservé.')) return;
-      await api('/account', { method: 'DELETE' });
-      closeAccountModal();
-      toast('Compte supprimé', 'ok');
-      logout(false);
     } else if (action === 'leave-role') {
       await api('/admin/logout-role', { method: 'POST' });
       state.user = await api('/auth/me');
@@ -2061,8 +2349,18 @@ document.addEventListener('submit', async (e) => {
     render();
     try {
       const data = await api('/auth/login', { method: 'POST', body: { username, password }, noLogout: true });
-      saveSession(data.token, data.user);
       state.loggingIn = false;
+      if (data && data.twoFactorRequired && data.challengeToken) {
+        state.challengeToken = data.challengeToken;
+        state.twofaCode = '';
+        state.twofaRecovery = '';
+        state.loginMode = 'twofa';
+        state.loginPassword = '';
+        render();
+        return;
+      }
+      saveSession(data.token, data.user);
+      state.loginNotice = null;
       await bootAfterLogin();
     } catch (err) {
       state.loggingIn = false;
@@ -2092,6 +2390,100 @@ document.addEventListener('submit', async (e) => {
       state.regBusy = false;
       state.regError = err.message;
       state.error = err.message;
+      render();
+    }
+    return;
+  }
+
+  if (e.target.id === 'forgot-form') {
+    const email = String(new FormData(e.target).get('email') || '').trim();
+    if (!email) return;
+    state.forgotEmail = email;
+    state.forgotBusy = true;
+    state.loginError = null;
+    render();
+    try {
+      await api('/auth/forgot-password', { method: 'POST', body: { email }, noLogout: true });
+      state.forgotDone = true;
+    } catch {
+      // Message volontairement neutre : on ne révèle pas si le compte existe.
+      state.loginError = 'Impossible d’envoyer le lien pour le moment. Réessayez plus tard.';
+    }
+    state.forgotBusy = false;
+    render();
+    return;
+  }
+
+  if (e.target.id === 'reset-form') {
+    const fd = new FormData(e.target);
+    const password = String(fd.get('password') || '');
+    const confirm = String(fd.get('confirm') || '');
+    state.resetPassword = password;
+    state.resetConfirm = confirm;
+    state.loginError = null;
+    if (password.length < 6) {
+      state.loginError = 'Le nouveau mot de passe doit contenir au moins 6 caractères.';
+      render();
+      return;
+    }
+    if (password !== confirm) {
+      state.loginError = 'Les mots de passe ne correspondent pas.';
+      render();
+      return;
+    }
+    state.resetBusy = true;
+    render();
+    try {
+      await api('/auth/reset-password', {
+        method: 'POST',
+        body: { token: state.resetToken, password },
+        noLogout: true,
+      });
+      state.loginMode = 'login';
+      state.resetToken = '';
+      state.resetPassword = '';
+      state.resetConfirm = '';
+      state.resetValid = null;
+      state.resetBusy = false;
+      state.loginNotice = 'Mot de passe modifié. Connectez-vous avec votre nouveau mot de passe.';
+      toast('Mot de passe modifié', 'ok');
+    } catch (err) {
+      state.resetBusy = false;
+      state.loginError = err.message;
+    }
+    render();
+    return;
+  }
+
+  if (e.target.id === 'twofa-form') {
+    const fd = new FormData(e.target);
+    const code = String(fd.get('code') || '').trim();
+    const recoveryCode = String(fd.get('recoveryCode') || '').trim();
+    state.twofaCode = code;
+    state.twofaRecovery = recoveryCode;
+    state.loginError = null;
+    if (!code && !recoveryCode) {
+      state.loginError = 'Saisissez un code d’authentification ou un code de récupération.';
+      render();
+      return;
+    }
+    const body = { challengeToken: state.challengeToken };
+    if (code) body.code = code;
+    else body.recoveryCode = recoveryCode;
+    state.twofaBusy = true;
+    render();
+    try {
+      const data = await api('/auth/2fa/verify', { method: 'POST', body, noLogout: true });
+      saveSession(data.token, data.user);
+      state.twofaBusy = false;
+      state.challengeToken = '';
+      state.twofaCode = '';
+      state.twofaRecovery = '';
+      state.loginMode = 'login';
+      await bootAfterLogin();
+    } catch (err) {
+      state.twofaBusy = false;
+      state.loginError = err.message;
       render();
     }
     return;
@@ -2192,10 +2584,10 @@ document.addEventListener('submit', async (e) => {
 
   if (e.target.id === 'account-form') {
     const fd = new FormData(e.target);
-    const btn = $('button[type="submit"]', e.target);
     state.accountBusy = true;
     state.accountError = null;
-    if (btn) btn.disabled = true;
+    state.accountNotice = null;
+    drawAccountModal();
     try {
       state.account = await api('/account', {
         method: 'PATCH',
@@ -2206,13 +2598,160 @@ document.addEventListener('submit', async (e) => {
       });
       state.user = await api('/auth/me');
       state.accountBusy = false;
+      state.accountNotice = 'Informations du compte enregistrées.';
       toast('Informations du compte enregistrées', 'ok');
       render();
-      drawAccountModal();
     } catch (err) {
       state.accountBusy = false;
       state.accountError = err.message;
-      render();
+    }
+    drawAccountModal();
+    return;
+  }
+
+  if (e.target.id === 'account-password-form') {
+    const fd = new FormData(e.target);
+    const currentPassword = String(fd.get('currentPassword') || '');
+    const newPassword = String(fd.get('newPassword') || '');
+    const confirmPassword = String(fd.get('confirmPassword') || '');
+    state.passwordForm = { current: currentPassword, next: newPassword, confirm: confirmPassword };
+    state.accountError = null;
+    state.accountNotice = null;
+    if (newPassword.length < 6) {
+      state.accountError = 'Le nouveau mot de passe doit contenir au moins 6 caractères.';
+      drawAccountModal();
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      state.accountError = 'La confirmation ne correspond pas au nouveau mot de passe.';
+      drawAccountModal();
+      return;
+    }
+    state.passwordBusy = true;
+    drawAccountModal();
+    try {
+      const data = await api('/account/password', {
+        method: 'POST',
+        body: { currentPassword, newPassword },
+        noLogout: true, // un 401 ici signifie « ancien mot de passe incorrect »
+      });
+      // Le serveur révoque tous les anciens jetons : installer immédiatement le nouveau.
+      if (data && data.token) saveSession(data.token, state.user); else throw new Error('Nouveau jeton manquant');
+      state.passwordForm = { current: '', next: '', confirm: '' };
+      state.passwordBusy = false;
+      if (state.account) state.account.hasPassword = true;
+      state.accountNotice = 'Mot de passe modifié. Votre session a été renouvelée.';
+      toast('Mot de passe modifié', 'ok');
+    } catch (err) {
+      state.passwordBusy = false;
+      state.accountError = err.message;
+    }
+    drawAccountModal();
+    return;
+  }
+
+  if (e.target.id === '2fa-enable-form') {
+    const code = String(new FormData(e.target).get('code') || '').trim();
+    state.twofaSetupCode = code;
+    state.accountError = null;
+    if (!/^\d{6}$/.test(code)) {
+      state.accountError = 'Saisissez le code à 6 chiffres affiché par votre application.';
+      drawAccountModal();
+      return;
+    }
+    state.twofaSetupBusy = true;
+    drawAccountModal();
+    try {
+      const data = await api('/account/2fa/enable', {
+        method: 'POST',
+        body: { code },
+        noLogout: true,
+      });
+      if (state.account) state.account.twoFactorEnabled = true;
+      state.twofaRecoveryCodes = Array.isArray(data && data.recoveryCodes) ? data.recoveryCodes : [];
+      state.twofaSetup = null;
+      state.twofaSetupCode = '';
+      state.twofaSetupBusy = false;
+      state.accountNotice = 'Double authentification activée.';
+      toast('Double authentification activée', 'ok');
+    } catch (err) {
+      state.twofaSetupBusy = false;
+      state.accountError = err.message;
+    }
+    drawAccountModal();
+    return;
+  }
+
+  if (e.target.id === '2fa-disable-form') {
+    const fd = new FormData(e.target);
+    const code = String(fd.get('code') || '').trim();
+    const password = String(fd.get('password') || '');
+    state.twofaDisableCode = code;
+    state.twofaDisablePassword = password;
+    state.accountError = null;
+    if (!/^\d{6}$/.test(code)) {
+      state.accountError = 'Saisissez le code à 6 chiffres affiché par votre application.';
+      drawAccountModal();
+      return;
+    }
+    const body = { code };
+    if (state.account && state.account.hasPassword) {
+      if (!password) {
+        state.accountError = 'Saisissez votre mot de passe pour désactiver la double authentification.';
+        drawAccountModal();
+        return;
+      }
+      body.password = password;
+    }
+    state.twofaDisableBusy = true;
+    drawAccountModal();
+    try {
+      await api('/account/2fa/disable', { method: 'POST', body, noLogout: true });
+      if (state.account) state.account.twoFactorEnabled = false;
+      state.twofaDisableCode = '';
+      state.twofaDisablePassword = '';
+      state.twofaDisableBusy = false;
+      state.accountNotice = 'Double authentification désactivée.';
+      toast('Double authentification désactivée', 'ok');
+    } catch (err) {
+      state.twofaDisableBusy = false;
+      state.accountError = err.message;
+    }
+    drawAccountModal();
+    return;
+  }
+
+  if (e.target.id === 'account-delete-form') {
+    const acc = state.account || {};
+    const value = String(new FormData(e.target).get('value') || '');
+    if (acc.hasPassword) state.deletePassword = value;
+    else state.deleteConfirm = value;
+    state.accountError = null;
+    if (acc.hasPassword ? !value : value !== 'SUPPRIMER') {
+      state.accountError = acc.hasPassword
+        ? 'Saisissez votre mot de passe pour confirmer la suppression.'
+        : 'Saisissez exactement SUPPRIMER pour confirmer la suppression.';
+      drawAccountModal();
+      return;
+    }
+    if (!confirm('SUPPRIMER DÉFINITIVEMENT votre compte ? Vos commandes, messages et identités seront effacés. L’argent rapporté dans les finances sera conservé.')) return;
+    state.deleteBusy = true;
+    drawAccountModal();
+    try {
+      await api('/account', {
+        method: 'DELETE',
+        body: acc.hasPassword ? { password: value } : { confirm: value },
+        noLogout: true,
+      });
+      state.deleteBusy = false;
+      state.deletePassword = '';
+      state.deleteConfirm = '';
+      closeAccountModal();
+      toast('Compte supprimé', 'ok');
+      logout(false);
+    } catch (err) {
+      state.deleteBusy = false;
+      state.accountError = err.message;
       drawAccountModal();
     }
     return;
@@ -2256,11 +2795,44 @@ async function bootAfterLogin() {
 }
 
 async function init() {
-  // retour OAuth web : /?token=…&role=… ou /?linked=github après liaison
   const params = new URLSearchParams(location.search);
+  const resetToken = params.get('reset');
   const linkedProvider = params.get('linked');
   const urlError = loginErrorFromUrl();
   if (urlError) state.loginError = urlError;
+
+  // Retour depuis le lien e-mail : /app?reset=<jeton> (ou /?reset=<jeton>).
+  if (resetToken) {
+    state.resetToken = resetToken;
+    state.resetValid = null;
+    state.resetPassword = '';
+    state.resetConfirm = '';
+    state.resetBusy = false;
+    state.loginMode = 'reset';
+    state.loginError = null;
+    state.loginNotice = null;
+    state.error = null;
+    // Les anciens jetons seront révoqués après le reset : on repart du login.
+    state.token = '';
+    state.user = null;
+    localStorage.removeItem('stb_token');
+    if (state.socket) { state.socket.disconnect(); state.socket = null; }
+    history.replaceState({}, '', location.pathname);
+    render();
+    try {
+      const check = await api('/auth/reset-validate?token=' + encodeURIComponent(resetToken), {
+        noLogout: true,
+      });
+      state.resetValid = !!(check && check.valid);
+    } catch (err) {
+      state.resetValid = false;
+      state.loginError = err.message;
+    }
+    render();
+    return;
+  }
+
+  // retour OAuth web : /?token=…&role=… ou /?linked=github après liaison
   if (params.get('token')) {
     saveSession(params.get('token'), null);
     history.replaceState({}, '', location.pathname);

@@ -1,20 +1,29 @@
 package com.shoptabouffe.app.ui.screens.profile
 
+import android.graphics.BitmapFactory
+import android.util.Base64
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.BugReport
 import androidx.compose.material.icons.outlined.Cloud
@@ -36,11 +45,14 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
+import androidx.compose.material3.Tab
+import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -49,7 +61,10 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -63,6 +78,8 @@ import com.shoptabouffe.app.core.SocketManager
 import com.shoptabouffe.app.core.models.AccountInfo
 import com.shoptabouffe.app.core.models.CodeBody
 import com.shoptabouffe.app.core.models.Identity
+import com.shoptabouffe.app.core.models.TwoFactorEnableResponse
+import com.shoptabouffe.app.core.models.TwoFactorStartResponse
 import com.shoptabouffe.app.core.models.User
 import android.Manifest
 import android.content.Intent
@@ -399,7 +416,7 @@ fun ProfileScreen(user: User, vm: MainViewModel) {
 
     if (showAccountDialog) {
         AlertDialog(
-            onDismissRequest = { if (!accountBusy) showAccountDialog = false },
+            onDismissRequest = { if (!accountBusy && !upgradeActive) showAccountDialog = false },
             title = { Text("Mon compte") },
             text = {
                 AccountCard(
@@ -408,9 +425,15 @@ fun ProfileScreen(user: User, vm: MainViewModel) {
                     onSave = { email, phone -> vm.patchAccount(email, phone) },
                     onLink = { provider -> vm.linkAccount(provider, context) },
                     onUnlink = vm::unlinkAccount,
-                    onDelete = {
+                    onChangePassword = { current, next, done -> vm.changePassword(current, next, done) },
+                    onStartTwoFactor = { done -> vm.startTwoFactor(done) },
+                    onEnableTwoFactor = { code, done -> vm.enableTwoFactor(code, done) },
+                    onDisableTwoFactor = { code, password, done ->
+                        vm.disableTwoFactor(code, password, done)
+                    },
+                    onDelete = { password, confirm ->
                         showAccountDialog = false
-                        vm.deleteAccount()
+                        vm.deleteAccount(password, confirm)
                     },
                 )
             },
@@ -423,7 +446,23 @@ fun ProfileScreen(user: User, vm: MainViewModel) {
 
 /* --------------------------------------------------------------- compte */
 
-/** Carte « Mon compte » : coordonnées, identités liées et suppression. */
+/** Décode le QR `data:image/png;base64,...` renvoyé par /account/2fa/start. */
+private fun decodeQrBitmap(dataUrl: String?): ImageBitmap? {
+    if (dataUrl.isNullOrBlank()) return null
+    val base64 = dataUrl.substringAfter("base64,", dataUrl).trim()
+    return try {
+        val bytes = Base64.decode(base64, Base64.DEFAULT)
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+    } catch (_: IllegalArgumentException) {
+        null
+    }
+}
+
+/**
+ * Carte « Mon compte » découpée en quatre catégories : une seule est visible
+ * à la fois. Le contenu est scrollable et sans largeur fixe.
+ */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun AccountCard(
     account: AccountInfo?,
@@ -431,11 +470,38 @@ private fun AccountCard(
     onSave: (String, String) -> Unit,
     onLink: (String) -> Unit,
     onUnlink: (String) -> Unit,
-    onDelete: () -> Unit,
+    onChangePassword: (String, String, (Boolean) -> Unit) -> Unit,
+    onStartTwoFactor: ((ApiResult<TwoFactorStartResponse>) -> Unit) -> Unit,
+    onEnableTwoFactor: (String, (ApiResult<TwoFactorEnableResponse>) -> Unit) -> Unit,
+    onDisableTwoFactor: (String, String?, (ApiResult<TwoFactorEnableResponse>) -> Unit) -> Unit,
+    onDelete: (String?, String?) -> Unit,
 ) {
     var email by remember(account?.email) { mutableStateOf(account?.email.orEmpty()) }
     var phone by remember(account?.phone) { mutableStateOf(account?.phone.orEmpty()) }
+    var tab by rememberSaveable { mutableIntStateOf(0) }
     var confirmDelete by remember { mutableStateOf(false) }
+
+    var currentPassword by rememberSaveable { mutableStateOf("") }
+    var newPassword by rememberSaveable { mutableStateOf("") }
+    var confirmPassword by rememberSaveable { mutableStateOf("") }
+
+    var twoFactorSetup by remember { mutableStateOf<TwoFactorStartResponse?>(null) }
+    var recoveryCodes by remember { mutableStateOf<List<String>>(emptyList()) }
+    var enableCode by rememberSaveable { mutableStateOf("") }
+    var disableCode by rememberSaveable { mutableStateOf("") }
+    var disablePassword by rememberSaveable { mutableStateOf("") }
+
+    var deletePassword by rememberSaveable { mutableStateOf("") }
+    var deleteConfirm by rememberSaveable { mutableStateOf("") }
+
+    val qrBitmap = remember(twoFactorSetup?.qrDataUrl) { decodeQrBitmap(twoFactorSetup?.qrDataUrl) }
+
+    LaunchedEffect(account?.twoFactorEnabled) {
+        if (account?.twoFactorEnabled == true) {
+            twoFactorSetup = null
+            enableCode = ""
+        }
+    }
 
     Surface(
         shape = RoundedCornerShape(20.dp),
@@ -444,7 +510,10 @@ private fun AccountCard(
         modifier = Modifier.fillMaxWidth(),
     ) {
         Column(
-            modifier = Modifier.padding(16.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             if (account == null) {
@@ -454,92 +523,394 @@ private fun AccountCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             } else {
-                Text(
-                    "Connexion : ${Config.providerLabel(account.provider ?: "inconnu")}",
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-                Text(
-                    "Mot de passe : ${if (account.hasPassword) "configuré" else "aucun"}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-
-                OutlinedTextField(
-                    value = email,
-                    onValueChange = { email = it.take(180) },
-                    label = { Text("Email (facultatif)") },
-                    singleLine = true,
-                    shape = RoundedCornerShape(14.dp),
-                    keyboardOptions = KeyboardOptions(
-                        keyboardType = KeyboardType.Email,
-                        imeAction = ImeAction.Next,
-                    ),
+                val categories = listOf("Informations", "Sécurité", "Connexions", "Danger")
+                ScrollableTabRow(
+                    selectedTabIndex = tab.coerceIn(categories.indices),
+                    edgePadding = 0.dp,
                     modifier = Modifier.fillMaxWidth(),
-                )
-                OutlinedTextField(
-                    value = phone,
-                    onValueChange = { phone = it.take(30) },
-                    label = { Text("Téléphone") },
-                    singleLine = true,
-                    shape = RoundedCornerShape(14.dp),
-                    keyboardOptions = KeyboardOptions(
-                        keyboardType = KeyboardType.Phone,
-                        imeAction = ImeAction.Done,
-                    ),
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                PrimaryButton(
-                    text = "Enregistrer les coordonnées",
-                    onClick = { onSave(email, phone) },
-                    enabled = !busy,
-                    loading = busy,
-                    modifier = Modifier.fillMaxWidth(),
+                    tabs = {
+                        categories.forEachIndexed { index, label ->
+                            Tab(
+                                selected = tab == index,
+                                onClick = { tab = index },
+                                text = {
+                                    Text(
+                                        label,
+                                        style = MaterialTheme.typography.labelMedium,
+                                        maxLines = 1,
+                                    )
+                                },
+                            )
+                        }
+                    },
                 )
 
-                HorizontalDivider()
+                when (tab.coerceIn(categories.indices)) {
+                    // --------------------------------------------- Informations
+                    0 -> {
+                        Text(
+                            "Connexion : ${Config.providerLabel(account.provider ?: "inconnu")}",
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        Text(
+                            "Mot de passe : ${if (account.hasPassword) "configuré" else "aucun"}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        OutlinedTextField(
+                            value = email,
+                            onValueChange = { email = it.take(180) },
+                            label = { Text("Email (facultatif)") },
+                            singleLine = true,
+                            shape = RoundedCornerShape(14.dp),
+                            keyboardOptions = KeyboardOptions(
+                                keyboardType = KeyboardType.Email,
+                                imeAction = ImeAction.Next,
+                            ),
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        OutlinedTextField(
+                            value = phone,
+                            onValueChange = { phone = it.take(30) },
+                            label = { Text("Téléphone") },
+                            singleLine = true,
+                            shape = RoundedCornerShape(14.dp),
+                            keyboardOptions = KeyboardOptions(
+                                keyboardType = KeyboardType.Phone,
+                                imeAction = ImeAction.Done,
+                            ),
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        PrimaryButton(
+                            text = "Enregistrer les coordonnées",
+                            onClick = { onSave(email, phone) },
+                            enabled = !busy,
+                            loading = busy,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
 
-                Text("Identités liées", style = MaterialTheme.typography.titleSmall)
-                if (account.identities.isEmpty()) {
-                    Text(
-                        "Aucune identité liée pour le moment.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                account.identities.forEach { identity ->
-                    IdentityRow(identity = identity, busy = busy, onUnlink = onUnlink)
-                }
+                    // ------------------------------------------------ Sécurité
+                    1 -> {
+                        Text("Changer le mot de passe", style = MaterialTheme.typography.titleSmall)
+                        if (account.hasPassword) {
+                            OutlinedTextField(
+                                value = currentPassword,
+                                onValueChange = { currentPassword = it.take(128) },
+                                label = { Text("Mot de passe actuel") },
+                                singleLine = true,
+                                visualTransformation = PasswordVisualTransformation(),
+                                shape = RoundedCornerShape(14.dp),
+                                keyboardOptions = KeyboardOptions(
+                                    keyboardType = KeyboardType.Password,
+                                    imeAction = ImeAction.Next,
+                                ),
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                            OutlinedTextField(
+                                value = newPassword,
+                                onValueChange = { newPassword = it.take(128) },
+                                label = { Text("Nouveau mot de passe") },
+                                placeholder = { Text("6 caractères minimum") },
+                                singleLine = true,
+                                visualTransformation = PasswordVisualTransformation(),
+                                shape = RoundedCornerShape(14.dp),
+                                keyboardOptions = KeyboardOptions(
+                                    keyboardType = KeyboardType.Password,
+                                    imeAction = ImeAction.Next,
+                                ),
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                            OutlinedTextField(
+                                value = confirmPassword,
+                                onValueChange = { confirmPassword = it.take(128) },
+                                label = { Text("Confirmer le nouveau mot de passe") },
+                                singleLine = true,
+                                visualTransformation = PasswordVisualTransformation(),
+                                shape = RoundedCornerShape(14.dp),
+                                keyboardOptions = KeyboardOptions(
+                                    keyboardType = KeyboardType.Password,
+                                    imeAction = ImeAction.Done,
+                                ),
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                            PrimaryButton(
+                                text = "Changer le mot de passe",
+                                onClick = {
+                                    onChangePassword(currentPassword, newPassword) { success ->
+                                        if (success) {
+                                            currentPassword = ""
+                                            newPassword = ""
+                                            confirmPassword = ""
+                                        }
+                                    }
+                                },
+                                enabled = !busy && currentPassword.isNotEmpty() &&
+                                    newPassword.length >= 6 && newPassword == confirmPassword,
+                                loading = busy,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        } else {
+                            Text(
+                                "Ce compte n'a pas de mot de passe : utilisez une connexion " +
+                                    "GitHub ou Google pour vous identifier.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
 
-                val linkable = listOf("github", "google").filterNot { provider ->
-                    account.identities.any { it.provider == provider }
-                }
-                if (linkable.isNotEmpty()) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        linkable.forEach { provider ->
+                        HorizontalDivider()
+
+                        Text("Double authentification", style = MaterialTheme.typography.titleSmall)
+                        Text(
+                            "État : ${if (account.twoFactorEnabled) "activée" else "désactivée"}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        if (account.twoFactorEnabled) {
+                            Text(
+                                "Saisissez un code de votre application" +
+                                    (if (account.hasPassword) " et votre mot de passe" else "") +
+                                    " pour désactiver la double authentification.",
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                            OutlinedTextField(
+                                value = disableCode,
+                                onValueChange = { value ->
+                                    disableCode = value.filter { c -> c.isDigit() }.take(6)
+                                },
+                                label = { Text("Code de sécurité") },
+                                singleLine = true,
+                                shape = RoundedCornerShape(14.dp),
+                                keyboardOptions = KeyboardOptions(
+                                    keyboardType = KeyboardType.Number,
+                                    imeAction = ImeAction.Next,
+                                ),
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                            if (account.hasPassword) {
+                                OutlinedTextField(
+                                    value = disablePassword,
+                                    onValueChange = { disablePassword = it.take(128) },
+                                    label = { Text("Mot de passe") },
+                                    singleLine = true,
+                                    visualTransformation = PasswordVisualTransformation(),
+                                    shape = RoundedCornerShape(14.dp),
+                                    keyboardOptions = KeyboardOptions(
+                                        keyboardType = KeyboardType.Password,
+                                        imeAction = ImeAction.Done,
+                                    ),
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+                            }
                             OutlinedButton(
-                                onClick = { onLink(provider) },
-                                enabled = !busy,
-                                modifier = Modifier.weight(1f),
-                            ) { Text("Lier ${Config.providerLabel(provider)}") }
+                                onClick = {
+                                    onDisableTwoFactor(
+                                        disableCode,
+                                        disablePassword.takeIf { account.hasPassword },
+                                    ) { result ->
+                                        if (result is ApiResult.Success) {
+                                            disableCode = ""
+                                            disablePassword = ""
+                                        }
+                                    }
+                                },
+                                enabled = !busy && disableCode.length == 6 &&
+                                    (!account.hasPassword || disablePassword.isNotEmpty()),
+                                modifier = Modifier.fillMaxWidth(),
+                            ) { Text("Désactiver la double authentification") }
+                        } else {
+                            val setup = twoFactorSetup
+                            if (setup == null) {
+                                OutlinedButton(
+                                    onClick = {
+                                        onStartTwoFactor { result ->
+                                            if (result is ApiResult.Success) {
+                                                recoveryCodes = emptyList()
+                                                twoFactorSetup = result.data
+                                            }
+                                        }
+                                    },
+                                    enabled = !busy,
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) { Text("Configurer la double authentification") }
+                                Text(
+                                    "Un QR code et un secret vous seront affichés pour " +
+                                        "configurer votre application d'authentification.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            } else {
+                                if (qrBitmap != null) {
+                                    Image(
+                                        bitmap = qrBitmap,
+                                        contentDescription = "QR code de configuration",
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .heightIn(max = 220.dp),
+                                    )
+                                } else {
+                                    Text(
+                                        "QR code indisponible : saisissez le secret ci-dessous.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                    )
+                                }
+                                Text(
+                                    "Secret (saisie manuelle) :",
+                                    style = MaterialTheme.typography.labelSmall,
+                                )
+                                SelectionContainer {
+                                    Text(
+                                        setup.secret.orEmpty(),
+                                        style = MaterialTheme.typography.bodySmall,
+                                    )
+                                }
+                                OutlinedTextField(
+                                    value = enableCode,
+                                    onValueChange = { value ->
+                                        enableCode = value.filter { c -> c.isDigit() }.take(6)
+                                    },
+                                    label = { Text("Code de sécurité") },
+                                    singleLine = true,
+                                    shape = RoundedCornerShape(14.dp),
+                                    keyboardOptions = KeyboardOptions(
+                                        keyboardType = KeyboardType.Number,
+                                        imeAction = ImeAction.Done,
+                                    ),
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+                                FlowRow(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    PrimaryButton(
+                                        text = "Activer",
+                                        onClick = {
+                                            onEnableTwoFactor(enableCode) { result ->
+                                                if (result is ApiResult.Success) {
+                                                    recoveryCodes = result.data.recoveryCodes
+                                                    twoFactorSetup = null
+                                                    enableCode = ""
+                                                }
+                                            }
+                                        },
+                                        enabled = !busy && enableCode.length == 6,
+                                        loading = busy,
+                                    )
+                                    OutlinedButton(
+                                        onClick = {
+                                            twoFactorSetup = null
+                                            enableCode = ""
+                                        },
+                                        enabled = !busy,
+                                    ) { Text("Annuler") }
+                                }
+                            }
+
+                            if (recoveryCodes.isNotEmpty()) {
+                                HorizontalDivider()
+                                Text(
+                                    "Codes de récupération",
+                                    style = MaterialTheme.typography.titleSmall,
+                                )
+                                Text(
+                                    "Conservez ces codes : ils ne seront affichés qu'une seule fois.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                SelectionContainer {
+                                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        recoveryCodes.forEach { code ->
+                                            Text(code, style = MaterialTheme.typography.bodyMedium)
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
+
+                    // --------------------------------------------- Connexions
+                    2 -> {
+                        Text("Identités liées", style = MaterialTheme.typography.titleSmall)
+                        if (account.identities.isEmpty()) {
+                            Text(
+                                "Aucune identité liée pour le moment.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        account.identities.forEach { identity ->
+                            IdentityRow(identity = identity, busy = busy, onUnlink = onUnlink)
+                        }
+
+                        val linkable = listOf("github", "google").filterNot { provider ->
+                            account.identities.any { it.provider == provider }
+                        }
+                        if (linkable.isNotEmpty()) {
+                            FlowRow(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                linkable.forEach { provider ->
+                                    OutlinedButton(
+                                        onClick = { onLink(provider) },
+                                        enabled = !busy,
+                                    ) { Text("Lier ${Config.providerLabel(provider)}") }
+                                }
+                            }
+                        }
+                    }
+
+                    // ------------------------------------------------- Danger
+                    else -> {
+                        Text("Supprimer mon compte", style = MaterialTheme.typography.titleSmall)
+                        if (account.hasPassword) {
+                            OutlinedTextField(
+                                value = deletePassword,
+                                onValueChange = { deletePassword = it.take(128) },
+                                label = { Text("Mot de passe") },
+                                singleLine = true,
+                                visualTransformation = PasswordVisualTransformation(),
+                                shape = RoundedCornerShape(14.dp),
+                                keyboardOptions = KeyboardOptions(
+                                    keyboardType = KeyboardType.Password,
+                                    imeAction = ImeAction.Done,
+                                ),
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        } else {
+                            Text(
+                                "Saisissez exactement SUPPRIMER pour confirmer la suppression.",
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                            OutlinedTextField(
+                                value = deleteConfirm,
+                                onValueChange = { deleteConfirm = it.take(32) },
+                                label = { Text("Confirmation") },
+                                singleLine = true,
+                                shape = RoundedCornerShape(14.dp),
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
+                        OutlinedButton(
+                            onClick = { confirmDelete = true },
+                            enabled = !busy && if (account.hasPassword) {
+                                deletePassword.isNotEmpty()
+                            } else {
+                                deleteConfirm == "SUPPRIMER"
+                            },
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                contentColor = MaterialTheme.colorScheme.error,
+                            ),
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text("Supprimer mon compte") }
+                        Text(
+                            "Le journal financier du serveur est conservé après la suppression.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
-
-                HorizontalDivider()
-
-                TextButton(
-                    onClick = { confirmDelete = true },
-                    enabled = !busy,
-                    colors = ButtonDefaults.textButtonColors(
-                        contentColor = MaterialTheme.colorScheme.error,
-                    ),
-                    modifier = Modifier.padding(start = 0.dp),
-                ) { Text("Supprimer mon compte") }
-                Text(
-                    "Le journal financier du serveur est conservé après la suppression.",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
             }
         }
     }
@@ -558,7 +929,11 @@ private fun AccountCard(
                 TextButton(
                     onClick = {
                         confirmDelete = false
-                        onDelete()
+                        if (account?.hasPassword == true) {
+                            onDelete(deletePassword, null)
+                        } else {
+                            onDelete(null, deleteConfirm)
+                        }
                     },
                     colors = ButtonDefaults.textButtonColors(
                         contentColor = MaterialTheme.colorScheme.error,

@@ -2,7 +2,14 @@ import crypto from 'node:crypto';
 import { Router } from 'express';
 import { PROVIDERS, isConfigured, createState, consumeState } from '../oauth.js';
 import { db, toUser, nowIso } from '../db.js';
-import { signToken, requireAuth, userFromToken } from '../auth.js';
+import {
+  signToken, requireAuth, userFromToken,
+  hashPassword, verifyPassword, signTwoFactorChallenge,
+  userFromTwoFactorChallenge, revokeTokens,
+} from '../auth.js';
+import { verifyTotp, hashRecoveryCode } from '../totp.js';
+import { sendPasswordResetMail } from '../mail.js';
+import rateLimit from 'express-rate-limit';
 
 const router = Router();
 
@@ -218,29 +225,6 @@ router.get('/:provider/callback', async (req, res) => {
   }
 });
 
-/** Hash d'un mot de passe (scrypt + sel). Format : "salt:hash" (hex). */
-function hashPassword(password) {
-  const salt = crypto.randomBytes(16).toString('hex');
-  const hash = crypto.scryptSync(password, salt, 64).toString('hex');
-  return `${salt}:${hash}`;
-}
-
-/** Vérifie un mot de passe contre un hash stocké. */
-function verifyPassword(password, stored) {
-  if (!stored || typeof stored !== 'string' || !stored.includes(':')) return false;
-  const [salt, hash] = stored.split(':');
-  if (!salt || !hash) return false;
-  try {
-    const computed = crypto.scryptSync(password, salt, 64).toString('hex');
-    const a = Buffer.from(computed, 'hex');
-    const b = Buffer.from(hash, 'hex');
-    if (a.length !== b.length) return false;
-    return crypto.timingSafeEqual(a, b);
-  } catch {
-    return false;
-  }
-}
-
 /** POST /api/auth/register body { name, username, password } → { token, user } */
 router.post('/register', (req, res) => {
   const body = req.body && typeof req.body === 'object' ? req.body : {};
@@ -288,7 +272,103 @@ router.post('/login', (req, res) => {
   if (!user || !verifyPassword(password, user.password_hash)) {
     return res.status(401).json({ error: 'Identifiants invalides' });
   }
+  // Double authentification : on ne délivre le JWT qu'après vérification du code.
+  if (user.totp_enabled && user.totp_secret) {
+    return res.json({ twoFactorRequired: true, challengeToken: signTwoFactorChallenge(user) });
+  }
   return res.json({ token: signToken(user), user: toUser(user) });
+});
+
+/** Limiteur : évite le brute-force des codes 2FA et des liens de reset. */
+const sensitiveLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Trop de tentatives. Réessayez dans quelques minutes.' },
+});
+
+/** POST /api/auth/2fa/verify { challengeToken, code, recoveryCode? } → { token, user } */
+router.post('/2fa/verify', sensitiveLimiter, (req, res) => {
+  const body = req.body && typeof req.body === 'object' ? req.body : {};
+  const user = userFromTwoFactorChallenge(body.challengeToken);
+  if (!user) return res.status(401).json({ error: 'Challenge invalide ou expiré' });
+
+  const code = typeof body.code === 'string' ? body.code.trim() : '';
+  const recovery = typeof body.recoveryCode === 'string' ? body.recoveryCode.trim().toUpperCase() : '';
+  if (code && verifyTotp(user.totp_secret, code)) {
+    const fresh = db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
+    return res.json({ token: signToken(fresh), user: toUser(fresh) });
+  }
+
+  if (recovery) {
+    const hash = hashRecoveryCode(recovery);
+    const row = db
+      .prepare('SELECT id FROM recovery_codes WHERE user_id = ? AND code_hash = ? AND used_at IS NULL')
+      .get(user.id, hash);
+    if (row) {
+      db.prepare('UPDATE recovery_codes SET used_at = ? WHERE id = ?').run(nowIso(), row.id);
+      const fresh = db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
+      return res.json({ token: signToken(fresh), user: toUser(fresh) });
+    }
+  }
+  return res.status(401).json({ error: 'Code invalide' });
+});
+
+/**
+ * POST /api/auth/forgot-password { email } → { ok: true } dans tous les cas.
+ * Un jeton à usage unique (30 min) est stocké hashé et envoyé par e-mail.
+ */
+router.post('/forgot-password', sensitiveLimiter, async (req, res) => {
+  const body = req.body && typeof req.body === 'object' ? req.body : {};
+  const email = typeof body.email === 'string' ? body.email.trim().toLowerCase() : '';
+  if (email && email.length <= 180) {
+    const user = db.prepare('SELECT * FROM users WHERE lower(email) = ?').get(email);
+    if (user && user.password_hash) {
+      const token = crypto.randomBytes(32).toString('hex');
+      const expires = new Date(Date.now() + 30 * 60 * 1000).toISOString();
+      db.prepare(
+        'INSERT INTO password_resets (user_id, token_hash, expires_at, created_at) VALUES (?, ?, ?, ?)'
+      ).run(user.id, crypto.createHash('sha256').update(token).digest('hex'), expires, nowIso());
+      const link = `${PUBLIC_URL}/app?reset=${encodeURIComponent(token)}`;
+      await sendPasswordResetMail(user.email, link);
+    }
+  }
+  return res.json({ ok: true });
+});
+
+function validResetToken(token) {
+  if (typeof token !== 'string' || !/^[a-f0-9]{64}$/.test(token)) return null;
+  return db
+    .prepare(
+      `SELECT r.id, r.user_id FROM password_resets r
+       WHERE r.token_hash = ? AND r.used_at IS NULL AND r.expires_at > ?
+       ORDER BY r.id DESC LIMIT 1`
+    )
+    .get(crypto.createHash('sha256').update(token).digest('hex'), new Date().toISOString());
+}
+
+/** GET /api/auth/reset-validate?token=... → { valid: boolean } */
+router.get('/reset-validate', (req, res) => {
+  const token = typeof req.query.token === 'string' ? req.query.token : '';
+  return res.json({ valid: !!validResetToken(token) });
+});
+
+/** POST /api/auth/reset-password { token, password } → { ok: true } */
+router.post('/reset-password', sensitiveLimiter, (req, res) => {
+  const body = req.body && typeof req.body === 'object' ? req.body : {};
+  const reset = validResetToken(body.token);
+  const password = typeof body.password === 'string' ? body.password : '';
+  if (!reset) return res.status(400).json({ error: 'Lien invalide ou expiré' });
+  if (password.length < 6) return res.status(400).json({ error: 'password : 6 caractères minimum' });
+
+  db.transaction(() => {
+    db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hashPassword(password), reset.user_id);
+    // Invalide tous les jetons émis avant la réinitialisation, puis consomme le lien.
+    revokeTokens(reset.user_id);
+    db.prepare('UPDATE password_resets SET used_at = ? WHERE id = ?').run(nowIso(), reset.id);
+  })();
+  return res.json({ ok: true });
 });
 
 /** POST /api/auth/upgrade body { name?, username, password } (auth requise, compte démo uniquement)

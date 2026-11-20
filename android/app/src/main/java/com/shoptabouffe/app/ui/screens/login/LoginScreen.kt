@@ -2,6 +2,7 @@ package com.shoptabouffe.app.ui.screens.login
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,6 +25,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -32,7 +34,9 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -80,11 +84,26 @@ fun LoginScreen(vm: MainViewModel) {
     val context = LocalContext.current
     val notice by vm.loginNotice.collectAsStateWithLifecycle()
     val busy by vm.busy.collectAsStateWithLifecycle()
+    val challenge by vm.twoFactorChallenge.collectAsStateWithLifecycle()
+    val twoFactorNotice by vm.twoFactorNotice.collectAsStateWithLifecycle()
+    val forgotState by vm.forgotPasswordState.collectAsStateWithLifecycle()
 
     var mode by rememberSaveable { mutableIntStateOf(0) }
     var name by rememberSaveable { mutableStateOf("") }
     var username by rememberSaveable { mutableStateOf("") }
     var password by rememberSaveable { mutableStateOf("") }
+
+    var showForgot by remember { mutableStateOf(false) }
+    var forgotEmail by rememberSaveable { mutableStateOf("") }
+    var twoFactorCode by rememberSaveable { mutableStateOf("") }
+    var recoveryCode by rememberSaveable { mutableStateOf("") }
+
+    LaunchedEffect(challenge) {
+        if (challenge == null) {
+            twoFactorCode = ""
+            recoveryCode = ""
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -259,6 +278,21 @@ fun LoginScreen(vm: MainViewModel) {
                     loading = busy,
                     modifier = Modifier.fillMaxWidth(),
                 )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "Mot de passe oublié ?",
+                    style = MaterialTheme.typography.bodySmall.copy(
+                        color = MaterialTheme.colorScheme.primary,
+                    ),
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            vm.resetForgotPassword()
+                            showForgot = true
+                        }
+                        .padding(vertical = 6.dp),
+                )
             }
         }
 
@@ -290,6 +324,158 @@ fun LoginScreen(vm: MainViewModel) {
             textAlign = TextAlign.Center,
         )
         Spacer(Modifier.height(32.dp))
+    }
+
+    // --- Mot de passe oublié : confirmation neutre, sans révéler l'existence du compte.
+    if (showForgot) {
+        AlertDialog(
+            onDismissRequest = {
+                if (forgotState !is MainViewModel.ForgotPasswordState.Sending) showForgot = false
+            },
+            title = { Text("Mot de passe oublié ?") },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState()),
+                ) {
+                    when (forgotState) {
+                        is MainViewModel.ForgotPasswordState.Sent -> Text(
+                            "Si un compte est associé à cette adresse, un lien de " +
+                                "réinitialisation a été envoyé. Ouvrez le lien reçu dans votre " +
+                                "messagerie pour choisir un nouveau mot de passe.",
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+
+                        is MainViewModel.ForgotPasswordState.Sending -> Text(
+                            "Envoi en cours…",
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+
+                        else -> {
+                            Text(
+                                "Saisissez l'adresse e-mail de votre compte :",
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                            Spacer(Modifier.height(12.dp))
+                            OutlinedTextField(
+                                value = forgotEmail,
+                                onValueChange = { forgotEmail = it.take(180) },
+                                label = { Text("Adresse e-mail") },
+                                singleLine = true,
+                                shape = RoundedCornerShape(14.dp),
+                                keyboardOptions = KeyboardOptions(
+                                    keyboardType = KeyboardType.Email,
+                                    imeAction = ImeAction.Done,
+                                ),
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                            (forgotState as? MainViewModel.ForgotPasswordState.Failed)?.let {
+                                Spacer(Modifier.height(8.dp))
+                                Text(
+                                    it.message,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.error,
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                when (forgotState) {
+                    is MainViewModel.ForgotPasswordState.Sent -> TextButton(
+                        onClick = { showForgot = false },
+                    ) { Text("Fermer") }
+
+                    is MainViewModel.ForgotPasswordState.Sending -> Unit
+                    else -> TextButton(
+                        onClick = { vm.forgotPassword(forgotEmail) },
+                        enabled = forgotEmail.isNotBlank(),
+                    ) { Text("Envoyer le lien") }
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showForgot = false }) { Text("Annuler") }
+            },
+        )
+    }
+
+    // --- Second facteur : code TOTP ou code de récupération (jamais pour OAuth).
+    if (!challenge.isNullOrBlank()) {
+        AlertDialog(
+            onDismissRequest = { if (!busy) vm.cancelTwoFactor() },
+            title = { Text("Double authentification") },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState()),
+                ) {
+                    Text(
+                        "Saisissez le code à 6 chiffres de votre application, ou l'un " +
+                            "de vos codes de récupération.",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    OutlinedTextField(
+                        value = twoFactorCode,
+                        onValueChange = { value -> twoFactorCode = value.filter { c -> c.isDigit() }.take(6) },
+                        label = { Text("Code de sécurité") },
+                        singleLine = true,
+                        shape = RoundedCornerShape(14.dp),
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType = KeyboardType.Number,
+                            imeAction = ImeAction.Done,
+                        ),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    OutlinedTextField(
+                        value = recoveryCode,
+                        onValueChange = { recoveryCode = it.take(32) },
+                        label = { Text("Code de récupération") },
+                        singleLine = true,
+                        shape = RoundedCornerShape(14.dp),
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType = KeyboardType.Ascii,
+                            imeAction = ImeAction.Done,
+                        ),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    if (!twoFactorNotice.isNullOrBlank()) {
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            twoFactorNotice.orEmpty(),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Button(
+                        onClick = { vm.verifyTwoFactor(challenge.orEmpty(), code = twoFactorCode) },
+                        enabled = !busy && twoFactorCode.length == 6,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text(if (busy) "Vérification…" else "Valider le code") }
+                    OutlinedButton(
+                        onClick = {
+                            vm.verifyTwoFactor(challenge.orEmpty(), recoveryCode = recoveryCode)
+                        },
+                        enabled = !busy && recoveryCode.isNotBlank(),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("Utiliser un code de récupération") }
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = vm::cancelTwoFactor, enabled = !busy) { Text("Annuler") }
+            },
+        )
     }
 }
 

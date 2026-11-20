@@ -3,6 +3,8 @@ package com.shoptabouffe.app.core
 import com.shoptabouffe.app.core.models.AccountInfo
 import com.shoptabouffe.app.core.models.AccountLinkBody
 import com.shoptabouffe.app.core.models.AccountPatch
+import com.shoptabouffe.app.core.models.DeleteAccountBody
+import com.shoptabouffe.app.core.models.ForgotPasswordBody
 import com.shoptabouffe.app.core.models.AuthResponse
 import com.shoptabouffe.app.core.models.CategoriesResponse
 import com.shoptabouffe.app.core.models.Category
@@ -28,11 +30,19 @@ import com.shoptabouffe.app.core.models.MessageBody
 import com.shoptabouffe.app.core.models.MessagesResponse
 import com.shoptabouffe.app.core.models.Order
 import com.shoptabouffe.app.core.models.OrdersResponse
+import com.shoptabouffe.app.core.models.OkResponse
+import com.shoptabouffe.app.core.models.PasswordChangeBody
+import com.shoptabouffe.app.core.models.PasswordChangeResponse
 import com.shoptabouffe.app.core.models.Product
 import com.shoptabouffe.app.core.models.ProductsResponse
 import com.shoptabouffe.app.core.models.RegisterBody
 import com.shoptabouffe.app.core.models.SalesResponse
 import com.shoptabouffe.app.core.models.StatusBody
+import com.shoptabouffe.app.core.models.TwoFactorCodeBody
+import com.shoptabouffe.app.core.models.TwoFactorDisableBody
+import com.shoptabouffe.app.core.models.TwoFactorEnableResponse
+import com.shoptabouffe.app.core.models.TwoFactorStartResponse
+import com.shoptabouffe.app.core.models.TwoFactorVerifyBody
 import com.shoptabouffe.app.core.models.UploadResponse
 import com.shoptabouffe.app.core.models.User
 import com.google.gson.GsonBuilder
@@ -78,6 +88,14 @@ interface ShopTaBouffeApi {
     // disponible pour les comptes démo déjà existants (données conservées).
     @POST("auth/login")
     suspend fun login(@Body body: CredentialsBody): AuthResponse
+
+    /** Second facteur d'une connexion par mot de passe (jamais utilisé pour OAuth). */
+    @POST("auth/2fa/verify")
+    suspend fun verifyTwoFactor(@Body body: TwoFactorVerifyBody): AuthResponse
+
+    /** Confirmation neutre : la réponse est la même, que l'e-mail existe ou non. */
+    @POST("auth/forgot-password")
+    suspend fun forgotPassword(@Body body: ForgotPasswordBody): OkResponse
 
     @POST("auth/register")
     suspend fun register(@Body body: RegisterBody): AuthResponse
@@ -149,8 +167,20 @@ interface ShopTaBouffeApi {
     @DELETE("account/unlink/{provider}")
     suspend fun unlinkAccount(@Path("provider") provider: String): AccountInfo
 
+    @POST("account/password")
+    suspend fun changePassword(@Body body: PasswordChangeBody): PasswordChangeResponse
+
+    @POST("account/2fa/start")
+    suspend fun startTwoFactor(): TwoFactorStartResponse
+
+    @POST("account/2fa/enable")
+    suspend fun enableTwoFactor(@Body body: TwoFactorCodeBody): TwoFactorEnableResponse
+
+    @POST("account/2fa/disable")
+    suspend fun disableTwoFactor(@Body body: TwoFactorDisableBody): TwoFactorEnableResponse
+
     @DELETE("account")
-    suspend fun deleteAccount(): DeleteResponse
+    suspend fun deleteAccount(@Body body: DeleteAccountBody): DeleteResponse
 
     // --- catégories -------------------------------------------------------
     @GET("categories")

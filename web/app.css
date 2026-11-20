@@ -53,8 +53,8 @@ img { max-width: 100%; }
   padding: 24px 16px;
 }
 .login-card {
-  width: 100%; max-width: 400px; background: var(--surface);
-  border: 1px solid var(--border); border-radius: 20px;
+  width: 100%; max-width: min(400px, calc(100vw - 24px)); background: var(--surface);
+  border: 1px solid var(--border); border-radius: 20px; box-sizing: border-box;
   padding: 32px 28px; box-shadow: var(--shadow); text-align: center;
 }
 .login-logo { font-size: 44px; line-height: 1; }
@@ -64,7 +64,8 @@ img { max-width: 100%; }
 .login-card label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 8px;
-  width: 100%; padding: 12px 16px; border-radius: 12px; border: 1px solid transparent;
+  width: 100%; max-width: 100%; box-sizing: border-box; white-space: normal;
+  padding: 12px 16px; border-radius: 12px; border: 1px solid transparent;
   background: var(--orange); color: #fff; font-weight: 600; cursor: pointer;
   transition: filter .15s, transform .05s;
 }
@@ -103,8 +104,18 @@ img { max-width: 100%; }
   background: rgba(255, 107, 107, .12); border: 1px solid rgba(255, 107, 107, .35);
   color: #ffb3b3; border-radius: 10px; padding: 9px 12px; font-size: 13.5px; margin-bottom: 14px;
 }
-.forgot { background: none; border: none; color: var(--muted); font-size: 12.5px; cursor: pointer; margin-top: 6px; padding: 4px; }
+.forgot {
+  display: block; background: none; border: none; color: var(--muted);
+  font-size: 12.5px; cursor: pointer; margin: 4px auto 12px; padding: 4px;
+  max-width: 100%; box-sizing: border-box;
+}
 .forgot:hover { color: var(--text); text-decoration: underline; }
+.auth-title { font-size: 18px; margin: 4px 0 10px; }
+.login-card-text {
+  text-align: left; color: var(--muted); font-size: 13.5px;
+  margin: 0 0 14px; overflow-wrap: anywhere;
+}
+.auth-stack { display: flex; flex-direction: column; gap: 10px; }
 
 /* ---------- layout ---------- */
 .topbar {
@@ -247,7 +258,8 @@ main {
 .field { margin-bottom: 13px; }
 .field label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
 .field input, .field textarea, .field select {
-  width: 100%; padding: 10px 13px; border-radius: 11px;
+  width: 100%; max-width: 100%; min-width: 0; box-sizing: border-box;
+  padding: 10px 13px; border-radius: 11px;
   background: var(--surface-2); border: 1px solid var(--border); outline: none;
 }
 .field input:focus, .field textarea:focus, .field select:focus { border-color: var(--orange); }
@@ -354,13 +366,14 @@ main {
 .profile-head .sub { color: var(--muted); font-size: 13.5px; }
 .setting-row {
   display: flex; align-items: center; gap: 13px; padding: 13px 4px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--border); flex-wrap: wrap; min-width: 0;
+  box-sizing: border-box;
 }
 .setting-row:last-child { border-bottom: none; }
-.setting-row .ic { font-size: 19px; width: 26px; text-align: center; }
-.setting-row .info { flex: 1; }
-.setting-row .info .t { font-weight: 600; font-size: 14.5px; }
-.setting-row .info .s { color: var(--muted); font-size: 12.5px; }
+.setting-row .ic { font-size: 19px; width: 26px; text-align: center; flex-shrink: 0; }
+.setting-row .info { flex: 1 1 160px; min-width: 0; }
+.setting-row .info .t { font-weight: 600; font-size: 14.5px; overflow-wrap: anywhere; }
+.setting-row .info .s { color: var(--muted); font-size: 12.5px; overflow-wrap: anywhere; }
 .switch { position: relative; width: 46px; height: 26px; flex-shrink: 0; }
 .switch input { opacity: 0; width: 0; height: 0; }
 .switch .track {
@@ -421,18 +434,80 @@ main {
 
 .modal-backdrop {
   position: fixed; inset: 0; background: rgba(0, 0, 0, .65); z-index: 50;
-  display: flex; align-items: center; justify-content: center; padding: 18px;
+  display: flex; align-items: center; justify-content: center; padding: 12px;
+  box-sizing: border-box; overflow-y: auto;
 }
 /* Finalisation de compte : modale non fermable, le fond est inerte. */
 .modal-mandatory { z-index: 100; background: rgba(0, 0, 0, .82); }
-.modal-mandatory .modal { max-width: 440px; border-color: var(--orange); }
+.modal-mandatory .modal { max-width: min(440px, calc(100vw - 24px)); border-color: var(--orange); }
 .modal {
   background: var(--surface); border: 1px solid var(--border); border-radius: 18px;
-  width: 100%; max-width: 480px; max-height: 92vh; overflow-y: auto; padding: 22px;
+  width: 100%; max-width: min(560px, calc(100vw - 24px));
+  max-height: 92vh; max-height: min(92vh, calc(100dvh - 24px)); overflow-y: auto;
+  padding: 22px; box-sizing: border-box; min-width: 0;
 }
 .modal h3 { margin: 0 0 16px; }
-.modal .actions { display: flex; gap: 10px; margin-top: 18px; }
-.modal .actions .btn { flex: 1; }
+.modal .actions { display: flex; gap: 10px; margin-top: 18px; flex-wrap: wrap; }
+.modal .actions .btn { flex: 1 1 160px; max-width: 100%; }
+
+/* ---------- modale « Gérer le compte » ---------- */
+.account-tabs {
+  display: flex; gap: 6px; margin-bottom: 16px; padding-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin; max-width: 100%;
+}
+.account-tab {
+  flex: 0 0 auto; white-space: nowrap; max-width: 100%;
+  padding: 8px 12px; border-radius: 10px; border: 1px solid var(--border);
+  background: var(--surface-2); color: var(--muted); font-size: 13px; cursor: pointer;
+}
+.account-tab:hover { background: var(--surface-3); }
+.account-tab.active {
+  background: var(--orange); border-color: var(--orange); color: #fff; font-weight: 600;
+}
+.account-panel { min-width: 0; }
+.modal h4 { font-size: 14px; margin: 0 0 10px; }
+.account-subsection {
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: 12px;
+  padding: 14px; margin-bottom: 14px; min-width: 0;
+}
+.account-subsection .setting-row { padding: 10px 0; }
+.account-links { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.account-links .btn { flex: 1 1 160px; }
+.pill {
+  flex-shrink: 0; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 700;
+  background: var(--surface-3); color: var(--muted);
+}
+.pill.on { background: rgba(52, 211, 153, .16); color: var(--green); }
+.twofa-qr {
+  display: block; width: min(190px, 60vw); height: auto; margin: 10px auto 14px;
+  background: #fff; padding: 8px; border-radius: 10px;
+}
+.twofa-secret {
+  display: block; user-select: all; overflow-wrap: anywhere; word-break: break-all;
+  background: var(--bg); border: 1px dashed var(--border); border-radius: 10px;
+  padding: 10px 12px; font-size: 13px; letter-spacing: .5px;
+}
+.recovery-box {
+  border: 1px solid rgba(255, 194, 75, .45); background: rgba(255, 194, 75, .08);
+  border-radius: 12px; padding: 14px; margin-bottom: 14px; min-width: 0;
+}
+.recovery-title {
+  display: flex; align-items: center; gap: 8px; color: var(--amber);
+  font-weight: 700; font-size: 13.5px; margin-bottom: 8px;
+}
+.recovery-codes {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 140px), 1fr));
+  gap: 8px; margin-bottom: 12px;
+}
+.recovery-codes code {
+  user-select: all; overflow-wrap: anywhere; text-align: center;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+  padding: 8px 6px; font-size: 13px;
+}
+.danger-zone { border-color: rgba(255, 107, 107, .3); }
+.danger-zone h4 { color: var(--red); }
 
 /* ---------- catégories (modale fournisseur) ---------- */
 .cat-list { display: flex; flex-direction: column; gap: 8px; margin: 4px 0 6px; max-height: 46vh; overflow: auto; }
@@ -497,9 +572,19 @@ main {
   .toolbar .search { min-width: 130px; }
   .cart-line { flex-wrap: wrap; }
   .cart-line .info { flex-basis: calc(100% - 70px); }
-  .modal { padding: 18px 16px; border-radius: 16px; }
-  .modal-backdrop { padding: 12px; align-items: flex-end; }
+  .modal {
+    padding: 18px 16px; border-radius: 16px;
+    max-width: min(560px, calc(100vw - 24px));
+    max-height: calc(100vh - 24px); max-height: calc(100dvh - 24px);
+  }
+  .modal-backdrop { padding: 12px; align-items: center; }
   .login-card { padding: 26px 20px; }
+  .setting-row { gap: 10px; }
+  .setting-row .info { flex-basis: 100%; }
+  .setting-row > .btn, .setting-row > .switch { margin-left: 36px; }
+  .field input, .field textarea, .field select { font-size: 16px; }
+  .account-tabs { gap: 5px; }
+  .account-subsection { padding: 12px; }
   .profile-head { gap: 12px; }
   .product-admin-row { flex-wrap: wrap; }
   .product-admin-row .acts { width: 100%; justify-content: flex-end; }
@@ -510,6 +595,13 @@ main {
   .nav button .ic { font-size: 18px; }
   .grid { grid-template-columns: repeat(2, 1fr); }
   .fin-grid { grid-template-columns: 1fr 1fr; }
+  .login-wrap { padding: 12px; }
+  .login-card { padding: 22px 16px; }
+  .modal { padding: 16px 14px; }
+  .modal .actions .btn { flex-basis: 100%; }
+  .account-tabs { gap: 4px; }
+  .account-tab { font-size: 12.5px; padding: 7px 10px; }
+  .setting-row > .btn, .setting-row > .switch { margin-left: 0; width: 100%; }
 }
 
 /* grands écrans : on garde la même coque, contenu centré */

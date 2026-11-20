@@ -13,6 +13,16 @@ import com.shoptabouffe.app.core.models.AccountInfo
 import com.shoptabouffe.app.core.models.AccountLinkBody
 import com.shoptabouffe.app.core.models.AccountPatch
 import com.shoptabouffe.app.core.models.AuthResponse
+import com.shoptabouffe.app.core.models.DeleteAccountBody
+import com.shoptabouffe.app.core.models.ForgotPasswordBody
+import com.shoptabouffe.app.core.models.OkResponse
+import com.shoptabouffe.app.core.models.PasswordChangeBody
+import com.shoptabouffe.app.core.models.PasswordChangeResponse
+import com.shoptabouffe.app.core.models.TwoFactorCodeBody
+import com.shoptabouffe.app.core.models.TwoFactorDisableBody
+import com.shoptabouffe.app.core.models.TwoFactorEnableResponse
+import com.shoptabouffe.app.core.models.TwoFactorStartResponse
+import com.shoptabouffe.app.core.models.TwoFactorVerifyBody
 import com.shoptabouffe.app.core.Cart
 import com.shoptabouffe.app.core.Config
 import com.shoptabouffe.app.core.Session
@@ -47,6 +57,25 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** Message destiné à l'écran de connexion (erreur OAuth…). */
     private val _loginNotice = MutableStateFlow<String?>(null)
     val loginNotice: StateFlow<String?> = _loginNotice.asStateFlow()
+
+    /** Défi 2FA renvoyé par POST /auth/login (connexion par mot de passe uniquement). */
+    private val _twoFactorChallenge = MutableStateFlow<String?>(null)
+    val twoFactorChallenge: StateFlow<String?> = _twoFactorChallenge.asStateFlow()
+
+    /** Erreur du dialogue 2FA, distincte du bandeau de connexion. */
+    private val _twoFactorNotice = MutableStateFlow<String?>(null)
+    val twoFactorNotice: StateFlow<String?> = _twoFactorNotice.asStateFlow()
+
+    sealed interface ForgotPasswordState {
+        data object Idle : ForgotPasswordState
+        data object Sending : ForgotPasswordState
+        data object Sent : ForgotPasswordState
+        data class Failed(val message: String) : ForgotPasswordState
+    }
+
+    /** Dialogue « Mot de passe oublié ? » : toujours la même confirmation. */
+    private val _forgotPasswordState = MutableStateFlow<ForgotPasswordState>(ForgotPasswordState.Idle)
+    val forgotPasswordState: StateFlow<ForgotPasswordState> = _forgotPasswordState.asStateFlow()
 
     /**
      * Ancien compte « par nom » encore connecté : on ne le supprime pas, on
@@ -206,13 +235,83 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
         _loginNotice.value = null
+        _twoFactorNotice.value = null
+        _twoFactorChallenge.value = null
         _busy.value = true
         viewModelScope.launch {
             when (val result = Api.call { Api.service.login(CredentialsBody(username, password)) }) {
-                is ApiResult.Success -> applyAuth(result.data, "Le serveur n'a pas renvoyé de jeton.")
+                is ApiResult.Success -> {
+                    val response = result.data
+                    when {
+                        // 2FA uniquement sur la connexion par mot de passe (jamais OAuth).
+                        response.twoFactorRequired && !response.challengeToken.isNullOrBlank() -> {
+                            _twoFactorChallenge.value = response.challengeToken
+                        }
+                        response.twoFactorRequired ->
+                            _loginNotice.value = "Le serveur n'a pas renvoyé de défi de sécurité."
+                        else -> applyAuth(response, "Le serveur n'a pas renvoyé de jeton.")
+                    }
+                }
                 is ApiResult.Failure -> _loginNotice.value = result.message
             }
             _busy.value = false
+        }
+    }
+
+    /** Étape 2 d'une connexion protégée : code TOTP ou code de récupération. */
+    fun verifyTwoFactor(challengeToken: String, code: String? = null, recoveryCode: String? = null) {
+        val totp = code?.trim().orEmpty()
+        val recovery = recoveryCode?.trim().orEmpty()
+        if (totp.isEmpty() && recovery.isEmpty()) {
+            _twoFactorNotice.value = "Saisissez un code de sécurité ou un code de récupération."
+            return
+        }
+        _twoFactorNotice.value = null
+        _busy.value = true
+        viewModelScope.launch {
+            when (
+                val result = Api.call {
+                    Api.service.verifyTwoFactor(
+                        TwoFactorVerifyBody(
+                            challengeToken = challengeToken,
+                            code = totp.ifBlank { null },
+                            recoveryCode = recovery.ifBlank { null },
+                        ),
+                    )
+                }
+            ) {
+                is ApiResult.Success -> applyAuth(result.data, "Le serveur n'a pas renvoyé de jeton.")
+                is ApiResult.Failure -> _twoFactorNotice.value = result.message
+            }
+            _busy.value = false
+        }
+    }
+
+    fun cancelTwoFactor() {
+        _twoFactorChallenge.value = null
+        _twoFactorNotice.value = null
+    }
+
+    /** Ouvre le dialogue « Mot de passe oublié ? » à l'état initial. */
+    fun resetForgotPassword() {
+        _forgotPasswordState.value = ForgotPasswordState.Idle
+    }
+
+    /** POST /auth/forgot-password — toujours une confirmation neutre, sans énumération. */
+    fun forgotPassword(rawEmail: String) {
+        val email = rawEmail.trim()
+        if (email.isEmpty()) {
+            _forgotPasswordState.value = ForgotPasswordState.Failed("Saisissez votre adresse e-mail.")
+            return
+        }
+        _forgotPasswordState.value = ForgotPasswordState.Sending
+        viewModelScope.launch {
+            _forgotPasswordState.value = when (
+                val result = Api.call { Api.service.forgotPassword(ForgotPasswordBody(email)) }
+            ) {
+                is ApiResult.Success -> ForgotPasswordState.Sent
+                is ApiResult.Failure -> ForgotPasswordState.Failed(result.message)
+            }
         }
     }
 
@@ -272,6 +371,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun applyAuth(response: AuthResponse, missingMessage: String) {
         response.token?.let { token ->
+            _twoFactorChallenge.value = null
+            _twoFactorNotice.value = null
             SocketManager.disconnect()
             session.saveToken(token)
             _auth.value = AuthState.Loading
@@ -405,6 +506,110 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /**
+     * POST /api/account/password — le serveur révoque tous les anciens jetons.
+     * Le nouveau JWT doit remplacer immédiatement le token stocké, sinon
+     * l'utilisateur est déconnecté à la prochaine requête.
+     */
+    fun changePassword(
+        currentPassword: String,
+        newPassword: String,
+        onDone: ((Boolean) -> Unit)? = null,
+    ) {
+        if (currentPassword.isEmpty() || newPassword.length < 6) {
+            _accountNotice.value = "Mot de passe actuel requis et nouveau mot de passe (6 min.)."
+            onDone?.invoke(false)
+            return
+        }
+        _accountBusy.value = true
+        viewModelScope.launch {
+            var success = false
+            when (
+                val result = Api.call {
+                    Api.service.changePassword(PasswordChangeBody(currentPassword, newPassword))
+                }
+            ) {
+                is ApiResult.Success -> {
+                    val token = result.data.token
+                    if (token.isNullOrBlank()) {
+                        _accountNotice.value = "Le serveur n'a pas renvoyé de nouveau jeton, reconnectez-vous."
+                    } else {
+                        session.saveToken(token)
+                        refreshUser()
+                        _accountNotice.value = "Mot de passe modifié."
+                        success = true
+                    }
+                }
+                is ApiResult.Failure -> _accountNotice.value = result.message
+            }
+            _accountBusy.value = false
+            onDone?.invoke(success)
+        }
+    }
+
+    /** POST /api/account/2fa/start : secret en attente + QR (non actif tant que enable). */
+    fun startTwoFactor(onResult: (ApiResult<TwoFactorStartResponse>) -> Unit) {
+        _accountBusy.value = true
+        viewModelScope.launch {
+            val result = Api.call { Api.service.startTwoFactor() }
+            if (result is ApiResult.Failure) _accountNotice.value = result.message
+            _accountBusy.value = false
+            onResult(result)
+        }
+    }
+
+    /** POST /api/account/2fa/enable : renvoie les 8 codes de récupération à afficher une fois. */
+    fun enableTwoFactor(code: String, onResult: (ApiResult<TwoFactorEnableResponse>) -> Unit) {
+        val totp = code.trim()
+        if (totp.length != 6) {
+            _accountNotice.value = "Saisissez le code à 6 chiffres de votre application."
+            onResult(ApiResult.Failure(_accountNotice.value.orEmpty()))
+            return
+        }
+        _accountBusy.value = true
+        viewModelScope.launch {
+            val result = Api.call { Api.service.enableTwoFactor(TwoFactorCodeBody(totp)) }
+            when (result) {
+                is ApiResult.Success -> {
+                    _account.value = _account.value?.copy(twoFactorEnabled = true)
+                    _accountNotice.value = "Double authentification activée."
+                }
+                is ApiResult.Failure -> _accountNotice.value = result.message
+            }
+            _accountBusy.value = false
+            onResult(result)
+        }
+    }
+
+    /** POST /api/account/2fa/disable : mot de passe requis si le compte en possède un. */
+    fun disableTwoFactor(
+        code: String,
+        password: String?,
+        onResult: (ApiResult<TwoFactorEnableResponse>) -> Unit,
+    ) {
+        val totp = code.trim()
+        if (totp.length != 6) {
+            _accountNotice.value = "Saisissez le code à 6 chiffres de votre application."
+            onResult(ApiResult.Failure(_accountNotice.value.orEmpty()))
+            return
+        }
+        _accountBusy.value = true
+        viewModelScope.launch {
+            val result = Api.call {
+                Api.service.disableTwoFactor(TwoFactorDisableBody(totp, password?.takeIf { it.isNotBlank() }))
+            }
+            when (result) {
+                is ApiResult.Success -> {
+                    _account.value = _account.value?.copy(twoFactorEnabled = false)
+                    _accountNotice.value = "Double authentification désactivée."
+                }
+                is ApiResult.Failure -> _accountNotice.value = result.message
+            }
+            _accountBusy.value = false
+            onResult(result)
+        }
+    }
+
     /** Lance le parcours OAuth de liaison, le retour se fait en deep link « linked ». */
     fun linkAccount(provider: String, context: Context) {
         _accountBusy.value = true
@@ -440,11 +645,32 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** Suppression définitive : les données financières restent sur le serveur. */
-    fun deleteAccount() {
+    /**
+     * Suppression définitive : mot de passe si le compte en a un, sinon la
+     * confirmation exacte « SUPPRIMER ». Les données financières restent serveur.
+     */
+    fun deleteAccount(password: String? = null, confirm: String? = null) {
+        val hasPassword = _account.value?.hasPassword == true
+        if (hasPassword && password.isNullOrEmpty()) {
+            _accountNotice.value = "Saisissez votre mot de passe pour supprimer le compte."
+            return
+        }
+        if (!hasPassword && confirm != "SUPPRIMER") {
+            _accountNotice.value = "Saisissez SUPPRIMER pour confirmer."
+            return
+        }
         _accountBusy.value = true
         viewModelScope.launch {
-            when (val result = Api.call { Api.service.deleteAccount() }) {
+            when (
+                val result = Api.call {
+                    Api.service.deleteAccount(
+                        DeleteAccountBody(
+                            password = password?.takeIf { hasPassword },
+                            confirm = confirm?.takeIf { !hasPassword },
+                        ),
+                    )
+                }
+            ) {
                 is ApiResult.Success -> {
                     SocketManager.disconnect()
                     session.logout()
