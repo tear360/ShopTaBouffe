@@ -9,12 +9,15 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.shoptabouffe.app.core.Api
 import com.shoptabouffe.app.core.ApiResult
+import com.shoptabouffe.app.core.models.AuthResponse
 import com.shoptabouffe.app.core.Cart
 import com.shoptabouffe.app.core.Config
 import com.shoptabouffe.app.core.Session
 import com.shoptabouffe.app.core.SocketManager
 import com.shoptabouffe.app.core.Updater
+import com.shoptabouffe.app.core.models.CredentialsBody
 import com.shoptabouffe.app.core.models.NameBody
+import com.shoptabouffe.app.core.models.RegisterBody
 import com.shoptabouffe.app.core.models.User
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -179,6 +182,89 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun consumeLoginNotice() {
         _loginNotice.value = null
+    }
+
+    /** Connexion par nom d'utilisateur + mot de passe. */
+    fun login(rawUsername: String, password: String) {
+        val username = rawUsername.trim()
+        if (username.isEmpty() || password.isEmpty()) {
+            _loginNotice.value = "Nom d'utilisateur et mot de passe requis."
+            return
+        }
+        _loginNotice.value = null
+        _busy.value = true
+        viewModelScope.launch {
+            when (val result = Api.call { Api.service.login(CredentialsBody(username, password)) }) {
+                is ApiResult.Success -> applyAuth(result.data, "Le serveur n'a pas renvoyé de jeton.")
+                is ApiResult.Failure -> _loginNotice.value = result.message
+            }
+            _busy.value = false
+        }
+    }
+
+    /** Inscription : nom + utilisateur + mot de passe. */
+    fun registerAccount(name: String, rawUsername: String, password: String) {
+        val username = rawUsername.trim()
+        if (name.isBlank() || username.isEmpty() || password.length < 6) {
+            _loginNotice.value = "Nom, utilisateur (3 caractères min.) et mot de passe (6 min.) requis."
+            return
+        }
+        _loginNotice.value = null
+        _busy.value = true
+        viewModelScope.launch {
+            when (
+                val result =
+                    Api.call { Api.service.register(RegisterBody(name.trim(), username, password)) }
+            ) {
+                is ApiResult.Success -> applyAuth(result.data, "Le serveur n'a pas renvoyé de jeton.")
+                is ApiResult.Failure -> _loginNotice.value = result.message
+            }
+            _busy.value = false
+        }
+    }
+
+    /**
+     * Upgrade d'un compte invité (créé par nom) vers un compte complet.
+     * Toutes les données existantes sont conservées côté serveur.
+     */
+    fun upgradeAccount(name: String, rawUsername: String, password: String) {
+        val username = rawUsername.trim()
+        if (name.isBlank() || username.isEmpty() || password.length < 6) {
+            _updateNotice.value = "Nom, utilisateur (3 caractères min.) et mot de passe (6 min.) requis."
+            return
+        }
+        _updateNotice.value = null
+        _busy.value = true
+        viewModelScope.launch {
+            when (
+                val result =
+                    Api.call { Api.service.upgradeAccount(RegisterBody(name.trim(), username, password)) }
+            ) {
+                is ApiResult.Success -> {
+                    result.data.token?.let { token ->
+                        session.saveToken(token)
+                        _auth.value = AuthState.Loading
+                        resolveSession()
+                    } ?: run {
+                        _updateNotice.value = "Le serveur n'a pas renvoyé de jeton."
+                    }
+                }
+
+                is ApiResult.Failure -> _updateNotice.value = result.message
+            }
+            _busy.value = false
+        }
+    }
+
+    private fun applyAuth(response: AuthResponse, missingMessage: String) {
+        response.token?.let { token ->
+            SocketManager.disconnect()
+            session.saveToken(token)
+            _auth.value = AuthState.Loading
+            resolveSession()
+        } ?: run {
+            _loginNotice.value = missingMessage
+        }
     }
 
     /* --------------------------------------------------------- mise à jour */

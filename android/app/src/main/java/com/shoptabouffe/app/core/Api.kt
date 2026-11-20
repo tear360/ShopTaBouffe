@@ -7,6 +7,7 @@ import com.shoptabouffe.app.core.models.CategoryBody
 import com.shoptabouffe.app.core.models.CodeBody
 import com.shoptabouffe.app.core.models.ConversationsResponse
 import com.shoptabouffe.app.core.models.CreateExpenseBody
+import com.shoptabouffe.app.core.models.CredentialsBody
 import com.shoptabouffe.app.core.models.CreateOrderBody
 import com.shoptabouffe.app.core.models.CreateProductBody
 import com.shoptabouffe.app.core.models.ErrorBody
@@ -23,6 +24,7 @@ import com.shoptabouffe.app.core.models.Order
 import com.shoptabouffe.app.core.models.OrdersResponse
 import com.shoptabouffe.app.core.models.Product
 import com.shoptabouffe.app.core.models.ProductsResponse
+import com.shoptabouffe.app.core.models.RegisterBody
 import com.shoptabouffe.app.core.models.SalesResponse
 import com.shoptabouffe.app.core.models.StatusBody
 import com.shoptabouffe.app.core.models.UploadResponse
@@ -68,6 +70,16 @@ interface ShopTaBouffeApi {
     // --- auth -------------------------------------------------------------
     @POST("auth/demo")
     suspend fun demoLogin(@Body body: NameBody): AuthResponse
+
+    @POST("auth/login")
+    suspend fun login(@Body body: CredentialsBody): AuthResponse
+
+    @POST("auth/register")
+    suspend fun register(@Body body: RegisterBody): AuthResponse
+
+    /** Upgrade d'un compte démo (par nom) vers un compte complet, données conservées. */
+    @POST("auth/upgrade")
+    suspend fun upgradeAccount(@Body body: RegisterBody): AuthResponse
 
     @GET("auth/me")
     suspend fun me(): User

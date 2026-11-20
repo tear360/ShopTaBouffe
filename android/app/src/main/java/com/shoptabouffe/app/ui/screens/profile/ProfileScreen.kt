@@ -49,6 +49,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.shoptabouffe.app.BuildConfig
@@ -89,6 +91,9 @@ fun ProfileScreen(user: User, vm: MainViewModel) {
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var success by remember { mutableStateOf<String?>(null) }
+    var upName by rememberSaveable(user.id) { mutableStateOf(user.name) }
+    var upUsername by rememberSaveable(user.id) { mutableStateOf("") }
+    var upPassword by rememberSaveable(user.id) { mutableStateOf("") }
 
     LaunchedEffect(success) {
         success?.let {
@@ -154,6 +159,83 @@ fun ProfileScreen(user: User, vm: MainViewModel) {
                                             else MaterialTheme.colorScheme.onSurfaceVariant,
                                         )
                                     },
+                                )
+                            }
+                        }
+                    }
+                }
+
+                if (user.provider == "demo") {
+                    item { SectionHeader(title = "Créer un compte") }
+                    item {
+                        Surface(
+                            shape = RoundedCornerShape(20.dp),
+                            color = MaterialTheme.colorScheme.surface,
+                            shadowElevation = 1.dp,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Column(modifier = Modifier.padding(16.dp)) {
+                                InfoBanner(
+                                    "Vous êtes connecté en tant qu'invité. Créez un compte pour " +
+                                        "centraliser vos commandes : toutes vos données précédentes " +
+                                        "sont conservées."
+                                )
+                                Spacer(Modifier.height(14.dp))
+                                OutlinedTextField(
+                                    value = upName,
+                                    onValueChange = { upName = it.take(80) },
+                                    label = { Text("Votre nom") },
+                                    singleLine = true,
+                                    shape = RoundedCornerShape(14.dp),
+                                    keyboardOptions = KeyboardOptions(
+                                        capitalization = KeyboardCapitalization.Words,
+                                        imeAction = ImeAction.Next,
+                                    ),
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+                                Spacer(Modifier.height(12.dp))
+                                OutlinedTextField(
+                                    value = upUsername,
+                                    onValueChange = { upUsername = it.take(32) },
+                                    label = { Text("Nom d'utilisateur") },
+                                    placeholder = { Text("Ex. lea") },
+                                    singleLine = true,
+                                    shape = RoundedCornerShape(14.dp),
+                                    keyboardOptions = KeyboardOptions(
+                                        keyboardType = KeyboardType.Ascii,
+                                        imeAction = ImeAction.Next,
+                                    ),
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+                                Spacer(Modifier.height(12.dp))
+                                OutlinedTextField(
+                                    value = upPassword,
+                                    onValueChange = { upPassword = it.take(128) },
+                                    label = { Text("Mot de passe") },
+                                    placeholder = { Text("6 caractères minimum") },
+                                    singleLine = true,
+                                    visualTransformation = PasswordVisualTransformation(),
+                                    shape = RoundedCornerShape(14.dp),
+                                    keyboardOptions = KeyboardOptions(
+                                        keyboardType = KeyboardType.Password,
+                                        imeAction = ImeAction.Done,
+                                    ),
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+                                Spacer(Modifier.height(16.dp))
+                                PrimaryButton(
+                                    text = "Créer mon compte",
+                                    onClick = {
+                                        scope.launch {
+                                            busy = true
+                                            vm.upgradeAccount(upName, upUsername, upPassword)
+                                            busy = false
+                                        }
+                                    },
+                                    enabled = !busy && upName.isNotBlank() &&
+                                        upUsername.isNotBlank() && upPassword.length >= 6,
+                                    loading = busy,
+                                    modifier = Modifier.fillMaxWidth(),
                                 )
                             }
                         }

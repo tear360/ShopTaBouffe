@@ -34,6 +34,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -47,6 +48,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -69,12 +72,19 @@ private fun brandOf(provider: String): Brand = when (provider) {
     else -> Brand(Color.White, Color(0xFF1F1A17), Icons.Filled.Language, Color(0xFF4285F4))
 }
 
+/** 0 = Se connecter, 1 = S'inscrire, 2 = Connexion par nom. */
+private val TAB_LABELS = listOf("Se connecter", "S'inscrire", "Connexion par nom")
+
 @Composable
 fun LoginScreen(vm: MainViewModel) {
     val context = LocalContext.current
     val notice by vm.loginNotice.collectAsStateWithLifecycle()
     val busy by vm.busy.collectAsStateWithLifecycle()
+
+    var mode by rememberSaveable { mutableIntStateOf(0) }
     var name by rememberSaveable { mutableStateOf("") }
+    var username by rememberSaveable { mutableStateOf("") }
+    var password by rememberSaveable { mutableStateOf("") }
 
     Column(
         modifier = Modifier
@@ -109,7 +119,7 @@ fun LoginScreen(vm: MainViewModel) {
             textAlign = TextAlign.Center,
         )
 
-        Spacer(Modifier.height(36.dp))
+        Spacer(Modifier.height(28.dp))
 
         notice?.let { message ->
             Surface(
@@ -138,36 +148,151 @@ fun LoginScreen(vm: MainViewModel) {
             Spacer(Modifier.height(16.dp))
         }
 
-        OutlinedTextField(
-            value = name,
-            onValueChange = { name = it.take(40) },
-            label = { Text("Votre nom") },
-            placeholder = { Text("Ex. Léa") },
-            singleLine = true,
-            shape = RoundedCornerShape(14.dp),
-            keyboardOptions = KeyboardOptions(
-                capitalization = KeyboardCapitalization.Words,
-                imeAction = ImeAction.Done,
-            ),
+        // --- Onglets ---
+        Row(
             modifier = Modifier.fillMaxWidth(),
-        )
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            TAB_LABELS.forEachIndexed { index, label ->
+                LoginTab(
+                    label = label,
+                    selected = mode == index,
+                    onClick = { mode = index },
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        }
 
-        Spacer(Modifier.height(12.dp))
-        PrimaryButton(
-            text = "Se connecter avec ce nom",
-            onClick = { vm.demoLogin(name) },
-            enabled = !busy,
-            loading = busy,
-            modifier = Modifier.fillMaxWidth(),
-        )
+        Spacer(Modifier.height(18.dp))
 
-        Spacer(Modifier.height(10.dp))
-        Text(
-            "Sans compte : commandes possibles. Le chat avec le fournisseur est désormais accessible à tous.",
-            style = MaterialTheme.typography.bodySmall,
-            color = TextMuted,
-            textAlign = TextAlign.Center,
-        )
+        when (mode) {
+            // ---------------- Connexion par nom (invité) ----------------
+            2 -> {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it.take(40) },
+                    label = { Text("Votre nom") },
+                    placeholder = { Text("Ex. Léa") },
+                    singleLine = true,
+                    shape = RoundedCornerShape(14.dp),
+                    keyboardOptions = KeyboardOptions(
+                        capitalization = KeyboardCapitalization.Words,
+                        imeAction = ImeAction.Done,
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(12.dp))
+                PrimaryButton(
+                    text = "Se connecter avec ce nom",
+                    onClick = { vm.demoLogin(name) },
+                    enabled = !busy && name.isNotBlank(),
+                    loading = busy,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    "Compte invité : vos commandes sont conservées si vous créez un compte ensuite.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextMuted,
+                    textAlign = TextAlign.Center,
+                )
+            }
+
+            // ---------------- Inscription ----------------
+            1 -> {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it.take(80) },
+                    label = { Text("Votre nom") },
+                    placeholder = { Text("Ex. Léa") },
+                    singleLine = true,
+                    shape = RoundedCornerShape(14.dp),
+                    keyboardOptions = KeyboardOptions(
+                        capitalization = KeyboardCapitalization.Words,
+                        imeAction = ImeAction.Next,
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = username,
+                    onValueChange = { username = it.take(32) },
+                    label = { Text("Nom d'utilisateur") },
+                    placeholder = { Text("Ex. lea") },
+                    singleLine = true,
+                    shape = RoundedCornerShape(14.dp),
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Ascii,
+                        imeAction = ImeAction.Next,
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = { password = it.take(128) },
+                    label = { Text("Mot de passe") },
+                    placeholder = { Text("6 caractères minimum") },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    shape = RoundedCornerShape(14.dp),
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Password,
+                        imeAction = ImeAction.Done,
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(16.dp))
+                PrimaryButton(
+                    text = "Créer mon compte",
+                    onClick = { vm.registerAccount(name, username, password) },
+                    enabled = !busy && name.isNotBlank() &&
+                        username.isNotBlank() && password.length >= 6,
+                    loading = busy,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+
+            // ---------------- Connexion ----------------
+            else -> {
+                OutlinedTextField(
+                    value = username,
+                    onValueChange = { username = it.take(32) },
+                    label = { Text("Nom d'utilisateur") },
+                    placeholder = { Text("Ex. lea") },
+                    singleLine = true,
+                    shape = RoundedCornerShape(14.dp),
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Ascii,
+                        imeAction = ImeAction.Next,
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = { password = it.take(128) },
+                    label = { Text("Mot de passe") },
+                    placeholder = { Text("••••••") },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    shape = RoundedCornerShape(14.dp),
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Password,
+                        imeAction = ImeAction.Done,
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(16.dp))
+                PrimaryButton(
+                    text = "Se connecter",
+                    onClick = { vm.login(username, password) },
+                    enabled = !busy && username.isNotBlank() && password.isNotEmpty(),
+                    loading = busy,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        }
 
         Spacer(Modifier.height(28.dp))
         Row(
@@ -197,6 +322,43 @@ fun LoginScreen(vm: MainViewModel) {
             textAlign = TextAlign.Center,
         )
         Spacer(Modifier.height(32.dp))
+    }
+}
+
+@Composable
+private fun LoginTab(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    if (selected) {
+        Button(
+            onClick = onClick,
+            modifier = modifier.height(42.dp),
+            contentPadding = PaddingValues(horizontal = 4.dp),
+            shape = RoundedCornerShape(12.dp),
+        ) {
+            Text(
+                label,
+                style = MaterialTheme.typography.labelMedium,
+                maxLines = 1,
+                color = Color.White,
+            )
+        }
+    } else {
+        OutlinedButton(
+            onClick = onClick,
+            modifier = modifier.height(42.dp),
+            contentPadding = PaddingValues(horizontal = 4.dp),
+            shape = RoundedCornerShape(12.dp),
+        ) {
+            Text(
+                label,
+                style = MaterialTheme.typography.labelMedium,
+                maxLines = 1,
+            )
+        }
     }
 }
 
