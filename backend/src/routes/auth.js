@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { Router } from 'express';
 import { PROVIDERS, isConfigured, createState, consumeState } from '../oauth.js';
 import { db, toUser, nowIso } from '../db.js';
@@ -135,6 +136,100 @@ router.get('/:provider/callback', async (req, res) => {
     console.error(`[oauth] erreur callback ${provider}:`, err && err.message);
     return fail('provider_error');
   }
+});
+
+/** Hash d'un mot de passe (scrypt + sel). Format : "salt:hash" (hex). */
+function hashPassword(password) {
+  const salt = crypto.randomBytes(16).toString('hex');
+  const hash = crypto.scryptSync(password, salt, 64).toString('hex');
+  return `${salt}:${hash}`;
+}
+
+/** Vérifie un mot de passe contre un hash stocké. */
+function verifyPassword(password, stored) {
+  if (!stored || typeof stored !== 'string' || !stored.includes(':')) return false;
+  const [salt, hash] = stored.split(':');
+  if (!salt || !hash) return false;
+  try {
+    const computed = crypto.scryptSync(password, salt, 64).toString('hex');
+    const a = Buffer.from(computed, 'hex');
+    const b = Buffer.from(hash, 'hex');
+    if (a.length !== b.length) return false;
+    return crypto.timingSafeEqual(a, b);
+  } catch {
+    return false;
+  }
+}
+
+/** POST /api/auth/register body { name, username, password } → { token, user } */
+router.post('/register', (req, res) => {
+  const body = req.body && typeof req.body === 'object' ? req.body : {};
+  const name = typeof body.name === 'string' ? body.name.trim() : '';
+  const username = typeof body.username === 'string' ? body.username.trim().toLowerCase() : '';
+  const password = typeof body.password === 'string' ? body.password : '';
+  if (name.length < 1 || name.length > 80) return res.status(400).json({ error: 'name : 1 à 80 caractères' });
+  if (!/^[a-z0-9_.-]{3,32}$/.test(username)) return res.status(400).json({ error: 'username : 3 à 32 caractères (a-z, 0-9, . _ -)' });
+  if (password.length < 6) return res.status(400).json({ error: 'password : 6 caractères minimum' });
+
+  const existing = db.prepare("SELECT id FROM users WHERE provider = 'local' AND provider_id = ?").get(username);
+  if (existing) return res.status(409).json({ error: 'Ce nom d’utilisateur est déjà pris' });
+
+  const info = db
+    .prepare(
+      "INSERT INTO users (provider, provider_id, name, email, avatar_url, role, password_hash, created_at) VALUES ('local', ?, ?, NULL, NULL, 'customer', ?, ?)"
+    )
+    .run(username, name, hashPassword(password), nowIso());
+  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(info.lastInsertRowid);
+  return res.status(201).json({ token: signToken(user), user: toUser(user) });
+});
+
+/** POST /api/auth/login body { username, password } → { token, user } */
+router.post('/login', (req, res) => {
+  const body = req.body && typeof req.body === 'object' ? req.body : {};
+  const username = typeof body.username === 'string' ? body.username.trim().toLowerCase() : '';
+  const password = typeof body.password === 'string' ? body.password : '';
+  if (!username || !password) return res.status(400).json({ error: 'username et password requis' });
+
+  const user = db.prepare("SELECT * FROM users WHERE provider = 'local' AND provider_id = ?").get(username);
+  if (!user || !verifyPassword(password, user.password_hash)) {
+    return res.status(401).json({ error: 'Identifiants invalides' });
+  }
+  return res.json({ token: signToken(user), user: toUser(user) });
+});
+
+/** POST /api/auth/upgrade body { name?, username, password } (auth requise, compte démo uniquement)
+ *  → transforme le compte démo en compte local, en conservant l'id (et donc les données). */
+router.post('/upgrade', requireAuth, (req, res) => {
+  if (!req.user || req.user.provider !== 'demo') {
+    return res.status(403).json({ error: 'Réservé aux comptes créés par nom' });
+  }
+  const body = req.body && typeof req.body === 'object' ? req.body : {};
+  const name = typeof body.name === 'string' && body.name.trim() ? body.name.trim() : req.user.name;
+  const username = typeof body.username === 'string' ? body.username.trim().toLowerCase() : '';
+  const password = typeof body.password === 'string' ? body.password : '';
+  if (name.length < 1 || name.length > 80) return res.status(400).json({ error: 'name : 1 à 80 caractères' });
+  if (!/^[a-z0-9_.-]{3,32}$/.test(username)) return res.status(400).json({ error: 'username : 3 à 32 caractères (a-z, 0-9, . _ -)' });
+  if (password.length < 6) return res.status(400).json({ error: 'password : 6 caractères minimum' });
+
+  const existing = db.prepare("SELECT id FROM users WHERE provider = 'local' AND provider_id = ?").get(username);
+  if (existing) return res.status(409).json({ error: 'Ce nom d’utilisateur est déjà pris' });
+
+  db.prepare(
+    "UPDATE users SET provider = 'local', provider_id = ?, name = ?, password_hash = ? WHERE id = ?"
+  ).run(username, name, hashPassword(password), req.user.id);
+
+  // Le statut fournisseur éventuel était lié à la session (token) : on le conserve
+  // pour ce token en le ré-enregistrant (la session reste fournisseur).
+  const wasSupplier = db.prepare('SELECT 1 FROM supplier_sessions WHERE token = ?').get(req.token);
+  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
+  if (wasSupplier) {
+    db.prepare('INSERT OR REPLACE INTO supplier_sessions (token, user_id, created_at) VALUES (?, ?, ?)').run(
+      req.token,
+      user.id,
+      new Date().toISOString()
+    );
+  }
+  return res.json({ token: signToken(user), user: toUser(user) });
 });
 
 /** POST /api/auth/demo body { name } */

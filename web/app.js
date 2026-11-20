@@ -104,6 +104,9 @@ const state = {
   // divers
   loading: false, error: null, notice: null,
   loginError: null, loginName: '', loggingIn: false,
+  loginMode: 'login', loginUsername: '', loginPassword: '',
+  regName: '', regUsername: '', regPassword: '', regBusy: false, regError: null,
+  upgradeModal: false, upgradeName: '', upgradeUsername: '', upgradePassword: '', upgradeBusy: false, upgradeError: null,
   socket: null, joinedConv: null,
 };
 
@@ -244,10 +247,10 @@ function loginErrorFromUrl() {
 function render() {
   const app = $('#app');
   if (!state.token || !state.user) {
-    app.innerHTML = viewLogin();
+    app.innerHTML = viewLogin() + (state.upgradeModal ? viewUpgradeModal() : '');
     return;
   }
-  app.innerHTML = shell();
+  app.innerHTML = shell() + (state.upgradeModal ? viewUpgradeModal() : '');
   afterRender();
 }
 
@@ -255,13 +258,59 @@ function render() {
 
 function viewLogin() {
   const err = state.error || state.loginError;
+  const isLogin = state.loginMode === 'login';
+  const isRegister = state.loginMode === 'register';
+  const isDemo = state.loginMode === 'demo';
   return `
   <div class="login-wrap">
     <div class="login-card">
       <div class="login-logo">${ICONS.bag}</div>
       <h1>ShopTaBouffe</h1>
       ${err ? `<div class="login-error">${h(err)}</div>` : ''}
+      <div class="auth-tabs">
+        <button class="btn btn-ghost btn-sm ${isLogin ? 'active' : ''}" data-action="auth-mode" data-mode="login">Se connecter</button>
+        <button class="btn btn-ghost btn-sm ${isRegister ? 'active' : ''}" data-action="auth-mode" data-mode="register">S'inscrire</button>
+        <button class="btn btn-ghost btn-sm ${isDemo ? 'active' : ''}" data-action="auth-mode" data-mode="demo">Connexion par nom</button>
+      </div>
+      ${isLogin ? `
       <form id="login-form">
+        <div class="field">
+          <label for="login-username">Nom d'utilisateur</label>
+          <input id="login-username" name="username" maxlength="32" autocomplete="username"
+                 placeholder="Ex. : lea" value="${h(state.loginUsername)}" required />
+        </div>
+        <div class="field">
+          <label for="login-password">Mot de passe</label>
+          <input id="login-password" name="password" type="password" maxlength="128" autocomplete="current-password"
+                 placeholder="••••••" value="${h(state.loginPassword)}" required />
+        </div>
+        <button class="btn" type="submit" ${state.loggingIn ? 'disabled' : ''}>
+          ${state.loggingIn ? 'Connexion…' : 'Se connecter'}
+        </button>
+      </form>` : ''}
+      ${isRegister ? `
+      <form id="register-form">
+        <div class="field">
+          <label for="reg-name">Votre nom</label>
+          <input id="reg-name" name="name" maxlength="80" autocomplete="name"
+                 placeholder="Ex. : Léa" value="${h(state.regName)}" required />
+        </div>
+        <div class="field">
+          <label for="reg-username">Nom d'utilisateur</label>
+          <input id="reg-username" name="username" maxlength="32" autocomplete="username"
+                 placeholder="Ex. : lea" value="${h(state.regUsername)}" required />
+        </div>
+        <div class="field">
+          <label for="reg-password">Mot de passe</label>
+          <input id="reg-password" name="password" type="password" maxlength="128" autocomplete="new-password"
+                 placeholder="6 caractères minimum" value="${h(state.regPassword)}" required />
+        </div>
+        <button class="btn" type="submit" ${state.regBusy ? 'disabled' : ''}>
+          ${state.regBusy ? 'Création…' : 'Créer mon compte'}
+        </button>
+      </form>` : ''}
+      ${isDemo ? `
+      <form id="demo-form">
         <div class="field">
           <label for="login-name">Votre nom</label>
           <input id="login-name" name="name" maxlength="80" autocomplete="nickname"
@@ -270,15 +319,47 @@ function viewLogin() {
         <button class="btn" type="submit" ${state.loggingIn ? 'disabled' : ''}>
           ${state.loggingIn ? 'Connexion…' : 'Se connecter avec ce nom'}
         </button>
-      </form>
+      </form>` : ''}
+      ${isLogin || isRegister ? `
       <div class="divider">ou continuer avec</div>
       <a class="btn btn-provider google" href="/api/auth/start?provider=google&target=web">${LOGO_GOOGLE} Continuer avec Google</a>
-      <a class="btn btn-provider github" href="/api/auth/start?provider=github&target=web">${LOGO_GITHUB} Continuer avec GitHub</a>
+      <a class="btn btn-provider github" href="/api/auth/start?provider=github&target=web">${LOGO_GITHUB} Continuer avec GitHub</a>` : ''}
+    </div>
+  </div>`;
+
+function viewUpgradeModal() {
+  const err = state.upgradeError;
+  return `
+  <div class="modal-backdrop" id="upgrade-backdrop">
+    <div class="modal">
+      <h3>Créer un compte</h3>
+      <p style="color:var(--muted);font-size:13.5px;margin:0 0 14px">
+        Vous êtes connecté en tant qu'invité. Créez un compte pour centraliser vos commandes — vos données précédentes sont conservées.
+      </p>
+      ${err ? `<div class="login-error">${h(err)}</div>` : ''}
+      <form id="upgrade-form">
+        <div class="field">
+          <label for="up-name">Votre nom</label>
+          <input id="up-name" name="name" maxlength="80" value="${h(state.upgradeName)}" required />
+        </div>
+        <div class="field">
+          <label for="up-username">Nom d'utilisateur</label>
+          <input id="up-username" name="username" maxlength="32" value="${h(state.upgradeUsername)}" required />
+        </div>
+        <div class="field">
+          <label for="up-password">Mot de passe</label>
+          <input id="up-password" name="password" type="password" maxlength="128" placeholder="6 caractères minimum" value="${h(state.upgradePassword)}" required />
+        </div>
+        <div class="actions">
+          <button class="btn btn-ghost" type="button" data-action="upgrade-skip">Plus tard</button>
+          <button class="btn" type="submit" ${state.upgradeBusy ? 'disabled' : ''}>
+            ${state.upgradeBusy ? 'Création…' : 'Créer mon compte'}
+          </button>
+        </div>
+      </form>
     </div>
   </div>`;
 }
-
-/* ---------------- Coque : topbar + navigation ---------------- */
 
 function cartCount() { return state.cart.reduce((n, l) => n + l.qty, 0); }
 
@@ -1522,6 +1603,14 @@ document.addEventListener('click', async (e) => {
     if (action === 'go') {
       e.preventDefault();
       await go(el.dataset.view);
+    } else if (action === 'auth-mode') {
+      state.loginMode = el.dataset.mode;
+      state.loginError = null;
+      state.error = null;
+      render();
+    } else if (action === 'upgrade-skip') {
+      state.upgradeModal = false;
+      render();
     } else if (action === 'refresh') {
       await refresh();
     } else if (action === 'cat') {
@@ -1648,6 +1737,53 @@ document.addEventListener('submit', async (e) => {
   e.preventDefault();
 
   if (e.target.id === 'login-form') {
+    const username = String(new FormData(e.target).get('username') || '').trim();
+    const password = String(new FormData(e.target).get('password') || '');
+    if (!username || !password) return;
+    state.loggingIn = true;
+    state.loginUsername = username;
+    state.loginPassword = password;
+    state.loginError = null;
+    render();
+    try {
+      const data = await api('/auth/login', { method: 'POST', body: { username, password }, noLogout: true });
+      saveSession(data.token, data.user);
+      state.loggingIn = false;
+      await bootAfterLogin();
+    } catch (err) {
+      state.loggingIn = false;
+      state.loginError = err.message;
+      render();
+    }
+    return;
+  }
+
+  if (e.target.id === 'register-form') {
+    const fd = new FormData(e.target);
+    const name = String(fd.get('name') || '').trim();
+    const username = String(fd.get('username') || '').trim();
+    const password = String(fd.get('password') || '');
+    if (!name || !username || !password) return;
+    state.regBusy = true;
+    state.regName = name; state.regUsername = username; state.regPassword = password;
+    state.regError = null;
+    state.error = null;
+    render();
+    try {
+      const data = await api('/auth/register', { method: 'POST', body: { name, username, password }, noLogout: true });
+      saveSession(data.token, data.user);
+      state.regBusy = false;
+      await bootAfterLogin();
+    } catch (err) {
+      state.regBusy = false;
+      state.regError = err.message;
+      state.error = err.message;
+      render();
+    }
+    return;
+  }
+
+  if (e.target.id === 'demo-form') {
     const name = String(new FormData(e.target).get('name') || '').trim();
     if (!name) return;
     state.loggingIn = true;
@@ -1658,6 +1794,12 @@ document.addEventListener('submit', async (e) => {
       const data = await api('/auth/demo', { method: 'POST', body: { name }, noLogout: true });
       saveSession(data.token, data.user);
       state.loggingIn = false;
+      // Compte démo → proposer la création de compte (garde les données)
+      state.upgradeModal = true;
+      state.upgradeName = data.user.name || name;
+      state.upgradeUsername = '';
+      state.upgradePassword = '';
+      state.upgradeError = null;
       await bootAfterLogin();
     } catch (err) {
       state.loggingIn = false;
@@ -1692,7 +1834,30 @@ document.addEventListener('submit', async (e) => {
     return;
   }
 
-  if (e.target.id === 'chat-form') {
+  if (e.target.id === 'upgrade-form') {
+    const fd = new FormData(e.target);
+    const name = String(fd.get('name') || '').trim();
+    const username = String(fd.get('username') || '').trim();
+    const password = String(fd.get('password') || '');
+    if (!name || !username || !password) return;
+    state.upgradeBusy = true;
+    state.upgradeName = name; state.upgradeUsername = username; state.upgradePassword = password;
+    state.upgradeError = null;
+    render();
+    try {
+      const data = await api('/auth/upgrade', { method: 'POST', body: { name, username, password } });
+      saveSession(data.token, data.user);
+      state.upgradeBusy = false;
+      state.upgradeModal = false;
+      toast('Compte créé — vos données sont conservées', 'ok');
+      render();
+    } catch (err) {
+      state.upgradeBusy = false;
+      state.upgradeError = err.message;
+      render();
+    }
+    return;
+  }
     const inp = $('#chat-msg');
     const body = String(inp.value || '').trim();
     if (!body || state.sending || !state.conv) return;
