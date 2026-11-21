@@ -5,7 +5,6 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.shoptabouffe.app.core.Api
 import com.shoptabouffe.app.core.ApiResult
-import com.shoptabouffe.app.core.Session
 import com.shoptabouffe.app.core.SocketManager
 import com.shoptabouffe.app.core.models.Product
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -37,10 +36,6 @@ data class GalleryState(
 
 class GalleryViewModel(app: Application) : AndroidViewModel(app) {
 
-    /** Le fournisseur voit aussi les produits discontinués. */
-    private val showAllProducts: Boolean =
-        Session.current?.user?.value?.isSupplier == true
-
     private val _state = MutableStateFlow(GalleryState())
     val state: StateFlow<GalleryState> = _state.asStateFlow()
 
@@ -59,7 +54,9 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
         }
 
         viewModelScope.launch {
-            when (val result = Api.call { Api.service.products(available = if (showAllProducts) null else 1) }) {
+            // On affiche aussi les produits désactivés : l'UI pose le badge
+            // « Indisponible » et bloque l'ajout au panier, comme chez le fournisseur.
+            when (val result = Api.call { Api.service.products(available = null) }) {
                 is ApiResult.Success -> {
                     val current = _state.value
                     val products = result.data.products

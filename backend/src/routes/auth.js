@@ -323,7 +323,15 @@ router.post('/forgot-password', sensitiveLimiter, async (req, res) => {
   const body = req.body && typeof req.body === 'object' ? req.body : {};
   const email = typeof body.email === 'string' ? body.email.trim().toLowerCase() : '';
   if (email && email.length <= 180) {
-    const user = db.prepare('SELECT * FROM users WHERE lower(email) = ?').get(email);
+    // Plusieurs comptes peuvent partager la même adresse (OAuth + local) :
+    // on privilégie celui qui a un mot de passe, sinon le reset ne part jamais.
+    const user = db
+      .prepare(
+        `SELECT * FROM users WHERE lower(email) = ?
+         ORDER BY CASE WHEN password_hash IS NOT NULL AND password_hash <> '' THEN 0 ELSE 1 END, id
+         LIMIT 1`
+      )
+      .get(email);
     if (user && user.password_hash) {
       const token = crypto.randomBytes(32).toString('hex');
       const expires = new Date(Date.now() + 30 * 60 * 1000).toISOString();
