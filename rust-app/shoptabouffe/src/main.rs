@@ -12,7 +12,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 const API_BASE: &str = "https://chorizo.dpdns.org/api";
-const APP_VERSION: &str = "1.0.14";
+const APP_VERSION: &str = "1.0.15";
 
 /* ------------------------------------------------------- palette (Theme.kt) */
 
@@ -121,6 +121,19 @@ struct Account {
     two_factor_enabled: bool,
     #[serde(default)]
     identities: Vec<Identity>,
+    #[serde(rename = "verificationRequired", default)]
+    verification_required: bool,
+    #[serde(rename = "pendingEmail", default)]
+    pending_email: Option<String>,
+}
+
+/// GET /api/account/email/pending : vérification en attente.
+#[derive(Clone, Debug, Default, Deserialize)]
+struct PendingEmail {
+    #[serde(default)]
+    email: Option<String>,
+    #[serde(rename = "pendingEmail", default)]
+    pending_email: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -275,6 +288,8 @@ enum Msg {
     RoleUpdated(User),
     Products(Vec<Product>),
     Account(Account),
+    PendingEmail(Option<String>),
+    EmailVerified(Account),
     AccountDeleted,
     PasswordChanged(String),
     TwoFactorStarted {
@@ -333,6 +348,8 @@ struct ShopApp {
     account: Option<Account>,
     account_email: String,
     account_phone: String,
+    pending_email: Option<String>,
+    email_verify_code: String,
     account_confirm_delete: bool,
     // Modale « Gérer le compte » (contenu de la section Mon compte).
     account_modal: bool,
@@ -515,6 +532,8 @@ impl Default for ShopApp {
             account: None,
             account_email: String::new(),
             account_phone: String::new(),
+            pending_email: None,
+            email_verify_code: String::new(),
             account_confirm_delete: false,
             account_modal: false,
             account_tab: AccountTab::Informations,
@@ -702,8 +721,74 @@ fn update_account(tx: Sender<Msg>, token: String, email: String, phone: String) 
             None,
         ) {
             Ok(t) => parse_ok(&tx, t, |a: Account| {
-                let _ = tx.send(Msg::Notice("Compte mis à jour".into()));
+                if a.verification_required {
+                    if let Some(email) = a.pending_email.clone() {
+                        let _ = tx.send(Msg::PendingEmail(Some(email.clone())));
+                        let _ = tx.send(Msg::Notice(format!("Un code a été envoyé à {email}.")));
+                    }
+                } else {
+                    let _ = tx.send(Msg::Notice("Compte mis à jour".into()));
+                }
                 let _ = tx.send(Msg::Account(a));
+            }),
+            Err(e) => forward_err(&tx, e),
+        }
+    });
+}
+
+/// GET /api/account/email/pending — restaure la vérification après un rechargement.
+fn fetch_pending_email(tx: Sender<Msg>, token: String) {
+    thread::spawn(move || {
+        match http_call(
+            reqwest::Method::GET,
+            format!("{}/account/email/pending", API_BASE),
+            Some(token),
+            None,
+            None,
+        ) {
+            Ok(t) => parse_ok(&tx, t, |p: PendingEmail| {
+                let email = p.email.or(p.pending_email);
+                let _ = tx.send(Msg::PendingEmail(email));
+            }),
+            Err(e) => forward_err(&tx, e),
+        }
+    });
+}
+
+/// POST /api/account/email/verify — enregistre l'e-mail après validation du code.
+fn verify_email(tx: Sender<Msg>, token: String, code: String) {
+    thread::spawn(move || {
+        match http_call(
+            reqwest::Method::POST,
+            format!("{}/account/email/verify", API_BASE),
+            Some(token),
+            Some(serde_json::json!({ "code": code })),
+            None,
+        ) {
+            Ok(t) => parse_ok(&tx, t, |a: Account| {
+                let _ = tx.send(Msg::EmailVerified(a));
+            }),
+            Err(e) => forward_err(&tx, e),
+        }
+    });
+}
+
+/// POST /api/account/email/resend — renvoie le code (délai de 60 s côté serveur).
+fn resend_email(tx: Sender<Msg>, token: String) {
+    thread::spawn(move || {
+        match http_call(
+            reqwest::Method::POST,
+            format!("{}/account/email/resend", API_BASE),
+            Some(token),
+            None,
+            None,
+        ) {
+            Ok(t) => parse_ok(&tx, t, |p: PendingEmail| {
+                let email = p.email.or(p.pending_email);
+                let _ = tx.send(Msg::PendingEmail(email.clone()));
+                if let Some(e) = email {
+                    let _ = tx.send(Msg::Notice(format!("Nouveau code envoyé à {e}.")));
+                }
             }),
             Err(e) => forward_err(&tx, e),
         }
@@ -2090,6 +2175,8 @@ impl ShopApp {
         self.account = None;
         self.account_email.clear();
         self.account_phone.clear();
+        self.pending_email = None;
+        self.email_verify_code.clear();
         self.order_phone.clear();
         self.admin_tab = 0;
         self.create_menu = false;
@@ -2979,6 +3066,9 @@ impl ShopApp {
                 // Compte : tout le détail est regroupé dans une modale.
                 if btn_primary(ui, "Gérer le compte").clicked() {
                     self.account_modal = true;
+                    if let Some(t) = self.token.clone() {
+                        fetch_pending_email(self.tx.clone(), t);
+                    }
                 }
 
                 ui.add_space(12.0);
@@ -4353,6 +4443,29 @@ impl eframe::App for ShopApp {
                     }
                     self.account = Some(a);
                 }
+                Msg::PendingEmail(email) => {
+                    self.pending_email = email;
+                    if self.pending_email.is_none() {
+                        self.email_verify_code.clear();
+                    }
+                }
+                Msg::EmailVerified(a) => {
+                    self.pending_email = None;
+                    self.email_verify_code.clear();
+                    self.account_email = a.email.clone().unwrap_or_default();
+                    self.account_phone = a.phone.clone().unwrap_or_default();
+                    if let Some(u) = self.user.as_mut() {
+                        u.id = a.id;
+                        u.name = a.name.clone();
+                        u.role = a.role.clone();
+                        u.email = a.email.clone();
+                        u.phone = a.phone.clone();
+                        u.avatar_url = a.avatar_url.clone();
+                        u.provider = a.provider.clone();
+                    }
+                    self.account = Some(a);
+                    self.set_notice("Adresse e-mail vérifiée et enregistrée.");
+                }
                 Msg::AccountDeleted => {
                     self.logout();
                     self.set_notice("Compte supprimé. Vos finances restent conservées.");
@@ -5108,6 +5221,37 @@ impl ShopApp {
                 }
             }
         });
+
+        if let Some(email) = self.pending_email.clone() {
+            ui.add_space(10.0);
+            ui.label(format!(
+                "Un code à 6 chiffres a été envoyé à {email}. Votre adresse actuelle reste inchangée jusqu’à validation."
+            ));
+            self.email_verify_code = self
+                .email_verify_code
+                .chars()
+                .filter(|c| c.is_ascii_digit())
+                .take(6)
+                .collect();
+            ui.add(
+                egui::TextEdit::singleline(&mut self.email_verify_code)
+                    .hint_text("123456")
+                    .desired_width(160.0),
+            );
+            let code = self.email_verify_code.clone();
+            ui.horizontal_wrapped(|ui| {
+                if btn_primary(ui, "Vérifier le code").clicked() {
+                    if let Some(t) = token.clone() {
+                        verify_email(tx.clone(), t, code.clone());
+                    }
+                }
+                if btn_ghost(ui, "Renvoyer le code").clicked() {
+                    if let Some(t) = token.clone() {
+                        resend_email(tx.clone(), t);
+                    }
+                }
+            });
+        }
     }
 
     /// Onglet Sécurité : mot de passe et double authentification.

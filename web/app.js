@@ -115,6 +115,7 @@ const state = {
   // compte
   account: null, accountBusy: false, accountError: null, accountNotice: null,
   accountTab: 'info',
+  emailVerify: null, emailVerifyBusy: false,
   passwordForm: { current: '', next: '', confirm: '' }, passwordBusy: false,
   twofaSetup: null, twofaSetupCode: '', twofaSetupBusy: false,
   twofaRecoveryCodes: [], twofaDisableCode: '', twofaDisablePassword: '', twofaDisableBusy: false,
@@ -874,8 +875,27 @@ function accountInfoHtml(acc) {
         <label for="acc-email">Adresse e-mail (optionnel)</label>
         <input id="acc-email" name="email" type="email" maxlength="180"
                placeholder="vous@exemple.com" value="${h(acc.email || '')}" />
-        <span class="field-hint">Laissez vide si vous ne souhaitez pas renseigner d’adresse.</span>
+        <span class="field-hint">Laissez vide si vous ne souhaitez pas renseigner d’adresse. Une nouvelle adresse est enregistrée après vérification par code.</span>
       </div>
+      ${state.emailVerify ? `
+        <div class="info-box">
+          Un code à 6 chiffres a été envoyé à <strong>${h(state.emailVerify.email)}</strong>.<br>
+          Saisissez-le ci-dessous pour confirmer cette adresse. Votre adresse actuelle reste inchangée jusqu’à validation.
+        </div>
+        <div class="email-verify">
+          <div class="field">
+            <label for="acc-verify-code">Code de vérification</label>
+            <input id="acc-verify-code" inputmode="numeric" autocomplete="one-time-code"
+                   maxlength="6" placeholder="123456" />
+            <span class="field-hint">Le code expire dans 10 minutes.</span>
+          </div>
+          <button class="btn" type="button" data-action="email-verify" ${state.emailVerifyBusy ? 'disabled' : ''}>
+            ${state.emailVerifyBusy ? 'Vérification…' : 'Vérifier l’adresse'}
+          </button>
+          <button class="btn btn-ghost" type="button" data-action="email-resend" ${state.emailVerifyBusy ? 'disabled' : ''}>
+            Renvoyer le code
+          </button>
+        </div>` : ''}
       <div class="field">
         <label for="acc-phone">Numéro de téléphone</label>
         <input id="acc-phone" name="phone" maxlength="30" inputmode="tel"
@@ -2239,7 +2259,43 @@ document.addEventListener('click', async (e) => {
       state.accountTab = 'info';
       state.accountError = null;
       state.accountNotice = null;
+      try {
+        const pending = await api('/account/email/pending');
+        state.emailVerify = pending && pending.pending ? { email: pending.email } : null;
+      } catch { state.emailVerify = null; }
       openAccountModal();
+    } else if (action === 'email-verify' || action === 'email-resend') {
+      const typedCode = action === 'email-verify'
+        ? String(document.getElementById('acc-verify-code')?.value || '').replace(/\s+/g, '')
+        : '';
+      state.accountError = null;
+      state.accountNotice = null;
+      state.emailVerifyBusy = true;
+      drawAccountModal();
+      try {
+        let data;
+        if (action === 'email-resend') {
+          data = await api('/account/email/resend', { method: 'POST' });
+        } else {
+          data = await api('/account/email/verify', { method: 'POST', body: { code: typedCode } });
+        }
+        if (action === 'email-resend') {
+          state.emailVerify = { email: data.pendingEmail };
+          state.accountNotice = `Nouveau code envoyé à ${data.pendingEmail}.`;
+          toast('Nouveau code envoyé', 'ok');
+        } else {
+          state.account = data;
+          state.emailVerify = null;
+          state.user = await api('/auth/me');
+          state.accountNotice = 'Adresse e-mail vérifiée et enregistrée.';
+          toast('Adresse e-mail vérifiée', 'ok');
+          render();
+        }
+      } catch (err) {
+        state.accountError = err.message;
+      }
+      state.emailVerifyBusy = false;
+      drawAccountModal();
     } else if (action === 'account-tab') {
       state.accountTab = el.dataset.tab;
       state.accountError = null;
@@ -2589,18 +2645,26 @@ document.addEventListener('submit', async (e) => {
     state.accountNotice = null;
     drawAccountModal();
     try {
-      state.account = await api('/account', {
+      const saved = await api('/account', {
         method: 'PATCH',
         body: {
           email: String(fd.get('email') || '').trim(),
           phone: String(fd.get('phone') || '').trim(),
         },
       });
+      state.account = saved;
       state.user = await api('/auth/me');
       state.accountBusy = false;
-      state.accountNotice = 'Informations du compte enregistrées.';
-      toast('Informations du compte enregistrées', 'ok');
-      render();
+      if (saved.verificationRequired) {
+        state.emailVerify = { email: saved.pendingEmail };
+        state.accountNotice = `Un code a été envoyé à ${saved.pendingEmail}.`;
+        toast('Code de vérification envoyé', 'ok');
+      } else {
+        state.emailVerify = null;
+        state.accountNotice = 'Informations du compte enregistrées.';
+        toast('Informations du compte enregistrées', 'ok');
+        render();
+      }
     } catch (err) {
       state.accountBusy = false;
       state.accountError = err.message;

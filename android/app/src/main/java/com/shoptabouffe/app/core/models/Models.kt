@@ -28,6 +28,8 @@ data class AccountInfo(
     val hasPassword: Boolean = false,
     @SerializedName("twoFactorEnabled") val twoFactorEnabled: Boolean = false,
     val identities: List<Identity> = emptyList(),
+    @SerializedName("verificationRequired") val verificationRequired: Boolean = false,
+    @SerializedName("pendingEmail") val pendingEmail: String? = null,
 ) {
     fun toUser(): User = User(
         id = id,
@@ -51,6 +53,23 @@ data class Identity(
 
 /** PATCH /api/account : "" permet d'effacer un champ (le serveur le convertit en null). */
 data class AccountPatch(val email: String? = null, val phone: String? = null)
+
+/** Codes de vérification d'une adresse e-mail ajoutée au compte. */
+data class EmailCodeBody(val code: String)
+
+data class PendingEmailResponse(
+    val pending: Boolean = false,
+    val email: String? = null,
+    @SerializedName("expiresAt") val expiresAt: String? = null,
+    @SerializedName("resendAfter") val resendAfter: Int = 0,
+)
+
+data class ResendEmailResponse(
+    val ok: Boolean = false,
+    @SerializedName("pendingEmail") val pendingEmail: String? = null,
+    @SerializedName("expiresIn") val expiresIn: Int = 0,
+    @SerializedName("resendAfter") val resendAfter: Int = 0,
+)
 
 data class AccountLinkBody(val provider: String, val target: String = "app")
 

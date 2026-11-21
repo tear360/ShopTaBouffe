@@ -1,6 +1,9 @@
 import { Router } from 'express';
+import rateLimit from 'express-rate-limit';
+import crypto from 'node:crypto';
 import QRCode from 'qrcode';
 import { db, toUser, nowIso } from '../db.js';
+import { sendEmailVerificationMail } from '../mail.js';
 import { requireAuth, hashPassword, verifyPassword, revokeTokens, signToken } from '../auth.js';
 import { PROVIDERS, isConfigured } from '../oauth.js';
 import {
@@ -11,6 +14,43 @@ import {
 const router = Router();
 
 const PUBLIC_URL = (process.env.PUBLIC_URL || 'http://10.0.2.2:3000').replace(/\/+$/, '');
+
+const EMAIL_CODE_TTL_MS = 10 * 60 * 1000;
+const EMAIL_CODE_RESEND_MS = 60 * 1000;
+const EMAIL_CODE_MAX_ATTEMPTS = 5;
+
+/** Limiteur : évite de brute-forcer les codes à 6 chiffres. */
+const emailCodeLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Trop de tentatives. Réessayez dans quelques minutes.' },
+});
+
+function pendingEmailVerification(userId) {
+  return db
+    .prepare('SELECT * FROM email_verifications WHERE user_id = ? ORDER BY id DESC LIMIT 1')
+    .get(userId);
+}
+
+function clearEmailVerifications(userId) {
+  db.prepare('DELETE FROM email_verifications WHERE user_id = ?').run(userId);
+}
+
+function hashEmailCode(salt, code) {
+  return crypto.createHash('sha256').update(`${salt}:${code}`).digest('hex');
+}
+
+function codeWaitSeconds(pending, now = Date.now()) {
+  if (!pending) return 0;
+  const wait = EMAIL_CODE_RESEND_MS - (now - Date.parse(pending.created_at));
+  return wait > 0 ? Math.ceil(wait / 1000) : 0;
+}
+
+function freshAccount(userId) {
+  return db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
+}
 
 function identitiesOf(userId) {
   return db
@@ -46,12 +86,22 @@ router.get('/', requireAuth, (req, res) => {
   return res.json(accountOf(user));
 });
 
-/** PATCH /api/account { email?, phone? } — les deux champs sont optionnels. */
-router.patch('/', requireAuth, (req, res) => {
+/**
+ * PATCH /api/account { email?, phone? } — les deux champs sont optionnels.
+ * Le téléphone est enregistré directement. Une nouvelle adresse e-mail est
+ * d'abord vérifiée par un code envoyé à cette adresse : elle n'est enregistrée
+ * que par POST /api/account/email/verify.
+ */
+router.patch('/', requireAuth, async (req, res) => {
   const body = req.body && typeof req.body === 'object' ? req.body : {};
   const has = (k) => Object.prototype.hasOwnProperty.call(body, k);
+  if (!has('email') && !has('phone')) {
+    return res.status(400).json({ error: 'Aucun champ à mettre à jour' });
+  }
+
   const sets = [];
   const values = [];
+  let pendingEmail = null;
 
   if (has('email')) {
     const raw = body.email;
@@ -62,8 +112,17 @@ router.patch('/', requireAuth, (req, res) => {
     if (email.length > 180 || (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email))) {
       return res.status(400).json({ error: 'email: adresse invalide' });
     }
-    sets.push('email = ?');
-    values.push(email || null);
+    const current = String(req.user.email || '').toLowerCase();
+    if (!email || email.toLowerCase() === current) {
+      // Effacement ou adresse inchangée : aucune vérification nécessaire.
+      clearEmailVerifications(req.user.id);
+      if (!email || current) {
+        sets.push('email = ?');
+        values.push(email || null);
+      }
+    } else {
+      pendingEmail = email;
+    }
   }
 
   if (has('phone')) {
@@ -79,11 +138,150 @@ router.patch('/', requireAuth, (req, res) => {
     values.push(phone || null);
   }
 
-  if (!sets.length) return res.status(400).json({ error: 'Aucun champ à mettre à jour' });
-  values.push(req.user.id);
-  db.prepare(`UPDATE users SET ${sets.join(', ')} WHERE id = ?`).run(...values);
-  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
-  return res.json(accountOf(user));
+  const saveChanges = () => {
+    if (!sets.length) return;
+    db.prepare(`UPDATE users SET ${sets.join(', ')} WHERE id = ?`).run(...values, req.user.id);
+  };
+
+  if (!pendingEmail) {
+    saveChanges();
+    return res.json(accountOf(freshAccount(req.user.id)));
+  }
+
+  const previous = pendingEmailVerification(req.user.id);
+  const wait = codeWaitSeconds(previous);
+  if (previous && previous.email.toLowerCase() === pendingEmail.toLowerCase() && wait > 0) {
+    return res.status(429).json({
+      error: `Un code a déjà été envoyé. Réessayez dans ${wait} s.`,
+      retryAfter: wait,
+      verificationRequired: true,
+      pendingEmail,
+    });
+  }
+
+  const code = String(crypto.randomInt(0, 1_000_000)).padStart(6, '0');
+  const salt = crypto.randomBytes(16).toString('hex');
+  clearEmailVerifications(req.user.id);
+  db.prepare(
+    `INSERT INTO email_verifications (user_id, email, salt, code_hash, expires_at, attempts, created_at)
+     VALUES (?, ?, ?, ?, ?, 0, ?)`
+  ).run(
+    req.user.id,
+    pendingEmail,
+    salt,
+    hashEmailCode(salt, code),
+    new Date(Date.now() + EMAIL_CODE_TTL_MS).toISOString(),
+    nowIso()
+  );
+
+  if (!(await sendEmailVerificationMail(pendingEmail, code))) {
+    clearEmailVerifications(req.user.id);
+    return res.status(503).json({ error: 'Impossible d’envoyer le code de vérification pour le moment.' });
+  }
+
+  saveChanges();
+  return res.json({
+    ...accountOf(freshAccount(req.user.id)),
+    verificationRequired: true,
+    pendingEmail,
+    expiresIn: EMAIL_CODE_TTL_MS / 1000,
+    resendAfter: EMAIL_CODE_RESEND_MS / 1000,
+  });
+});
+
+/** GET /api/account/email/pending — vérification en attente après un rechargement. */
+router.get('/email/pending', requireAuth, (req, res) => {
+  const pending = pendingEmailVerification(req.user.id);
+  if (!pending || Date.parse(pending.expires_at) <= Date.now()) {
+    if (pending) clearEmailVerifications(req.user.id);
+    return res.json({ pending: false });
+  }
+  return res.json({
+    pending: true,
+    email: pending.email,
+    expiresAt: pending.expires_at,
+    resendAfter: codeWaitSeconds(pending),
+  });
+});
+
+/** POST /api/account/email/resend — renvoie le code en attente (après 60 s). */
+router.post('/email/resend', requireAuth, emailCodeLimiter, async (req, res) => {
+  const pending = pendingEmailVerification(req.user.id);
+  if (!pending) return res.status(400).json({ error: 'Aucune vérification en attente' });
+  if (Date.parse(pending.expires_at) <= Date.now()) {
+    clearEmailVerifications(req.user.id);
+    return res.status(400).json({ error: 'Code expiré. Renseignez à nouveau l’adresse e-mail.' });
+  }
+  const wait = codeWaitSeconds(pending);
+  if (wait > 0) {
+    return res.status(429).json({
+      error: `Un code a déjà été envoyé. Réessayez dans ${wait} s.`,
+      retryAfter: wait,
+    });
+  }
+
+  const code = String(crypto.randomInt(0, 1_000_000)).padStart(6, '0');
+  const salt = crypto.randomBytes(16).toString('hex');
+  clearEmailVerifications(req.user.id);
+  db.prepare(
+    `INSERT INTO email_verifications (user_id, email, salt, code_hash, expires_at, attempts, created_at)
+     VALUES (?, ?, ?, ?, ?, 0, ?)`
+  ).run(
+    req.user.id,
+    pending.email,
+    salt,
+    hashEmailCode(salt, code),
+    new Date(Date.now() + EMAIL_CODE_TTL_MS).toISOString(),
+    nowIso()
+  );
+
+  if (!(await sendEmailVerificationMail(pending.email, code))) {
+    clearEmailVerifications(req.user.id);
+    return res.status(503).json({ error: 'Impossible d’envoyer le code de vérification pour le moment.' });
+  }
+  return res.json({
+    ok: true,
+    pendingEmail: pending.email,
+    expiresIn: EMAIL_CODE_TTL_MS / 1000,
+    resendAfter: EMAIL_CODE_RESEND_MS / 1000,
+  });
+});
+
+/** POST /api/account/email/verify { code } — enregistre l'e-mail après validation. */
+router.post('/email/verify', requireAuth, emailCodeLimiter, (req, res) => {
+  const body = req.body && typeof req.body === 'object' ? req.body : {};
+  const code = typeof body.code === 'string' ? body.code.replace(/\s+/g, '').trim() : '';
+  if (!/^\d{6}$/.test(code)) {
+    return res.status(400).json({ error: 'Saisissez le code à 6 chiffres reçu par e-mail.' });
+  }
+
+  const pending = pendingEmailVerification(req.user.id);
+  if (!pending) return res.status(400).json({ error: 'Aucune vérification en attente' });
+  if (Date.parse(pending.expires_at) <= Date.now()) {
+    clearEmailVerifications(req.user.id);
+    return res.status(400).json({ error: 'Code expiré. Renseignez à nouveau l’adresse e-mail.' });
+  }
+  if (pending.attempts >= EMAIL_CODE_MAX_ATTEMPTS) {
+    clearEmailVerifications(req.user.id);
+    return res.status(429).json({ error: 'Trop de tentatives. Demandez un nouveau code.' });
+  }
+
+  const expected = Buffer.from(hashEmailCode(pending.salt, code), 'hex');
+  const given = Buffer.from(pending.code_hash, 'hex');
+  const valid = expected.length === given.length && crypto.timingSafeEqual(expected, given);
+  if (!valid) {
+    db.prepare('UPDATE email_verifications SET attempts = attempts + 1 WHERE id = ?').run(pending.id);
+    return res.status(401).json({
+      error: 'Code incorrect',
+      remaining: EMAIL_CODE_MAX_ATTEMPTS - pending.attempts - 1,
+    });
+  }
+
+  db.transaction(() => {
+    db.prepare('UPDATE users SET email = ? WHERE id = ?').run(pending.email, req.user.id);
+    clearEmailVerifications(req.user.id);
+  })();
+  return res.json(accountOf(freshAccount(req.user.id)));
 });
 
 /**
@@ -270,6 +468,7 @@ router.delete('/', requireAuth, (req, res) => {
     db.prepare('DELETE FROM supplier_sessions WHERE user_id = ?').run(userId);
     db.prepare('DELETE FROM recovery_codes WHERE user_id = ?').run(userId);
     db.prepare('DELETE FROM password_resets WHERE user_id = ?').run(userId);
+    db.prepare('DELETE FROM email_verifications WHERE user_id = ?').run(userId);
     db.prepare('DELETE FROM user_identities WHERE user_id = ?').run(userId);
     db.prepare('DELETE FROM users WHERE id = ?').run(userId);
   })();

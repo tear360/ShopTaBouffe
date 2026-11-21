@@ -14,6 +14,7 @@ import com.shoptabouffe.app.core.models.AccountLinkBody
 import com.shoptabouffe.app.core.models.AccountPatch
 import com.shoptabouffe.app.core.models.AuthResponse
 import com.shoptabouffe.app.core.models.DeleteAccountBody
+import com.shoptabouffe.app.core.models.EmailCodeBody
 import com.shoptabouffe.app.core.models.ForgotPasswordBody
 import com.shoptabouffe.app.core.models.OkResponse
 import com.shoptabouffe.app.core.models.PasswordChangeBody
@@ -116,6 +117,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** Confirmations et erreurs des actions de gestion du compte. */
     private val _accountNotice = MutableStateFlow<String?>(null)
     val accountNotice: StateFlow<String?> = _accountNotice.asStateFlow()
+
+    /** Adresse en attente de vérification (code envoyé par e-mail). */
+    private val _pendingEmail = MutableStateFlow<String?>(null)
+    val pendingEmail: StateFlow<String?> = _pendingEmail.asStateFlow()
 
     init {
         resolveSession()
@@ -477,6 +482,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 is ApiResult.Success -> {
                     _account.value = result.data
                     updateUser(result.data.toUser())
+                    when (val pending = Api.call { Api.service.pendingEmailVerification() }) {
+                        is ApiResult.Success -> _pendingEmail.value =
+                            if (pending.data.pending) pending.data.email else null
+                        is ApiResult.Failure -> Unit
+                    }
                 }
 
                 is ApiResult.Failure -> _accountNotice.value = result.message
@@ -495,11 +505,50 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 }
             ) {
                 is ApiResult.Success -> {
-                    _account.value = result.data
-                    updateUser(result.data.toUser())
-                    _accountNotice.value = "Compte mis à jour."
+                    val updated = result.data
+                    _account.value = updated
+                    updateUser(updated.toUser())
+                    if (updated.verificationRequired && !updated.pendingEmail.isNullOrBlank()) {
+                        _pendingEmail.value = updated.pendingEmail
+                        _accountNotice.value = "Un code a été envoyé à ${updated.pendingEmail}."
+                    } else {
+                        _pendingEmail.value = null
+                        _accountNotice.value = "Compte mis à jour."
+                    }
                 }
 
+                is ApiResult.Failure -> _accountNotice.value = result.message
+            }
+            _accountBusy.value = false
+        }
+    }
+
+    /** POST /api/account/email/verify — enregistre l'e-mail après validation du code. */
+    fun verifyEmailCode(code: String) {
+        _accountBusy.value = true
+        viewModelScope.launch {
+            when (val result = Api.call { Api.service.verifyEmail(EmailCodeBody(code.trim())) }) {
+                is ApiResult.Success -> {
+                    _account.value = result.data
+                    updateUser(result.data.toUser())
+                    _pendingEmail.value = null
+                    _accountNotice.value = "Adresse e-mail vérifiée et enregistrée."
+                }
+                is ApiResult.Failure -> _accountNotice.value = result.message
+            }
+            _accountBusy.value = false
+        }
+    }
+
+    /** POST /api/account/email/resend — renvoie le code (délai de 60 s côté serveur). */
+    fun resendEmailCode() {
+        _accountBusy.value = true
+        viewModelScope.launch {
+            when (val result = Api.call { Api.service.resendEmailVerification() }) {
+                is ApiResult.Success -> {
+                    _pendingEmail.value = result.data.pendingEmail
+                    _accountNotice.value = "Nouveau code envoyé à ${result.data.pendingEmail}."
+                }
                 is ApiResult.Failure -> _accountNotice.value = result.message
             }
             _accountBusy.value = false
@@ -678,6 +727,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     _account.value = null
                     _needsUpgrade.value = null
                     _accountNotice.value = null
+                    _pendingEmail.value = null
                     _loginNotice.value = "Votre compte a été supprimé."
                     _auth.value = AuthState.LoggedOut
                 }
@@ -704,6 +754,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         Cart.clear()
         _account.value = null
         _needsUpgrade.value = null
+        _pendingEmail.value = null
         _loginNotice.value = null
         _auth.value = AuthState.LoggedOut
     }

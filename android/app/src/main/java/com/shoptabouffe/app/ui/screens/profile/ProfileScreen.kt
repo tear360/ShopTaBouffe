@@ -108,6 +108,7 @@ fun ProfileScreen(user: User, vm: MainViewModel) {
     val account by vm.account.collectAsStateWithLifecycle()
     val accountBusy by vm.accountBusy.collectAsStateWithLifecycle()
     val accountNotice by vm.accountNotice.collectAsStateWithLifecycle()
+    val pendingEmail by vm.pendingEmail.collectAsStateWithLifecycle()
     val needsUpgrade by vm.needsUpgrade.collectAsStateWithLifecycle()
     val upgradeActive = needsUpgrade != null
 
@@ -415,7 +416,10 @@ fun ProfileScreen(user: User, vm: MainViewModel) {
                 AccountCard(
                     account = account,
                     busy = accountBusy || upgradeActive,
+                    pendingEmail = pendingEmail,
                     onSave = { email, phone -> vm.patchAccount(email, phone) },
+                    onVerifyCode = { code -> vm.verifyEmailCode(code) },
+                    onResendCode = { vm.resendEmailCode() },
                     onLink = { provider -> vm.linkAccount(provider, context) },
                     onUnlink = vm::unlinkAccount,
                     onChangePassword = { current, next, done -> vm.changePassword(current, next, done) },
@@ -460,7 +464,10 @@ private fun decodeQrBitmap(dataUrl: String?): ImageBitmap? {
 private fun AccountCard(
     account: AccountInfo?,
     busy: Boolean,
+    pendingEmail: String? = null,
     onSave: (String, String) -> Unit,
+    onVerifyCode: (String) -> Unit,
+    onResendCode: () -> Unit,
     onLink: (String) -> Unit,
     onUnlink: (String) -> Unit,
     onChangePassword: (String, String, (Boolean) -> Unit) -> Unit,
@@ -471,6 +478,7 @@ private fun AccountCard(
 ) {
     var email by remember(account?.email) { mutableStateOf(account?.email.orEmpty()) }
     var phone by remember(account?.phone) { mutableStateOf(account?.phone.orEmpty()) }
+    var verifyCode by rememberSaveable { mutableStateOf("") }
     var tab by rememberSaveable { mutableIntStateOf(0) }
     var confirmDelete by remember { mutableStateOf(false) }
 
@@ -581,6 +589,36 @@ private fun AccountCard(
                             loading = busy,
                             modifier = Modifier.fillMaxWidth(),
                         )
+                        if (!pendingEmail.isNullOrBlank()) {
+                            InfoBanner(
+                                "Un code à 6 chiffres a été envoyé à $pendingEmail. " +
+                                    "Votre adresse actuelle reste inchangée jusqu’à validation."
+                            )
+                            OutlinedTextField(
+                                value = verifyCode,
+                                onValueChange = { value -> verifyCode = value.filter { it.isDigit() }.take(6) },
+                                label = { Text("Code de vérification") },
+                                singleLine = true,
+                                shape = RoundedCornerShape(14.dp),
+                                keyboardOptions = KeyboardOptions(
+                                    keyboardType = KeyboardType.Number,
+                                    imeAction = ImeAction.Done,
+                                ),
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                            PrimaryButton(
+                                text = "Vérifier le code",
+                                onClick = { onVerifyCode(verifyCode) },
+                                enabled = !busy && verifyCode.length == 6,
+                                loading = busy,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                            OutlinedButton(
+                                onClick = onResendCode,
+                                enabled = !busy,
+                                modifier = Modifier.fillMaxWidth(),
+                            ) { Text("Renvoyer le code") }
+                        }
                     }
 
                     // ------------------------------------------------ Sécurité

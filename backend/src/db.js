@@ -204,6 +204,20 @@ CREATE TABLE IF NOT EXISTS password_resets (
   created_at  TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_password_resets_hash ON password_resets(token_hash);
+
+-- Codes à 6 chiffres pour vérifier une adresse e-mail ajoutée au compte.
+-- Le code est stocké hashé avec un sel propre à chaque demande.
+CREATE TABLE IF NOT EXISTS email_verifications (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  email       TEXT NOT NULL,
+  salt        TEXT NOT NULL,
+  code_hash   TEXT NOT NULL,
+  expires_at  TEXT NOT NULL,
+  attempts    INTEGER NOT NULL DEFAULT 0,
+  created_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_email_verifications_user ON email_verifications(user_id);
 `);
 
 // Les comptes existants ont leur identité dans `users` : on la duplique dans

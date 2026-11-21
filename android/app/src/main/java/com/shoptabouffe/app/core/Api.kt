@@ -17,6 +17,7 @@ import com.shoptabouffe.app.core.models.CredentialsBody
 import com.shoptabouffe.app.core.models.CreateOrderBody
 import com.shoptabouffe.app.core.models.CreateProductBody
 import com.shoptabouffe.app.core.models.DeleteResponse
+import com.shoptabouffe.app.core.models.EmailCodeBody
 import com.shoptabouffe.app.core.models.ErrorBody
 import com.shoptabouffe.app.core.models.FormulesResponse
 import com.shoptabouffe.app.core.models.LinkResponse
@@ -33,9 +34,11 @@ import com.shoptabouffe.app.core.models.OrdersResponse
 import com.shoptabouffe.app.core.models.OkResponse
 import com.shoptabouffe.app.core.models.PasswordChangeBody
 import com.shoptabouffe.app.core.models.PasswordChangeResponse
+import com.shoptabouffe.app.core.models.PendingEmailResponse
 import com.shoptabouffe.app.core.models.Product
 import com.shoptabouffe.app.core.models.ProductsResponse
 import com.shoptabouffe.app.core.models.RegisterBody
+import com.shoptabouffe.app.core.models.ResendEmailResponse
 import com.shoptabouffe.app.core.models.SalesResponse
 import com.shoptabouffe.app.core.models.StatusBody
 import com.shoptabouffe.app.core.models.TwoFactorCodeBody
@@ -160,6 +163,15 @@ interface ShopTaBouffeApi {
 
     @PATCH("account")
     suspend fun updateAccount(@Body body: AccountPatch): AccountInfo
+
+    @GET("account/email/pending")
+    suspend fun pendingEmailVerification(): PendingEmailResponse
+
+    @POST("account/email/resend")
+    suspend fun resendEmailVerification(): ResendEmailResponse
+
+    @POST("account/email/verify")
+    suspend fun verifyEmail(@Body body: EmailCodeBody): AccountInfo
 
     @POST("account/link")
     suspend fun linkAccount(@Body body: AccountLinkBody): LinkResponse

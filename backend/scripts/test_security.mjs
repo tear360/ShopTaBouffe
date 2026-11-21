@@ -104,6 +104,50 @@ ok('jeton reset consommé');
 
 r = await call('POST', '/auth/login', { username: user.username, password: 'reset1234' }, null, 200);
 token = r.data.token;
+
+// Vérification de l'adresse e-mail ajoutée au compte.
+const accountRow = db.prepare("SELECT id FROM users WHERE provider = 'local' AND provider_id = ?").get(user.username);
+r = await call('PATCH', '/account', { email: 'verif@example.com', phone: '' }, token);
+if (r.status === 503) {
+  // SMTP non configuré en local : on crée la demande comme si le mail était parti.
+  db.prepare('DELETE FROM email_verifications WHERE user_id = ?').run(accountRow.id);
+  db.prepare(
+    'INSERT INTO email_verifications (user_id, email, salt, code_hash, expires_at, attempts, created_at) VALUES (?, ?, ?, ?, ?, 0, ?)'
+  ).run(accountRow.id, 'verif@example.com', 'local', '0'.repeat(64),
+    new Date(Date.now() + 10 * 60 * 1000).toISOString(), nowIso());
+  ok('PATCH email : SMTP absent, demande simulée');
+} else if (r.status !== 200) {
+  throw new Error(`PATCH email: ${r.status} ${JSON.stringify(r.data)}`);
+} else {
+  if (!r.data.verificationRequired || r.data.pendingEmail !== 'verif@example.com') {
+    throw new Error('PATCH email : vérification non demandée');
+  }
+  if (r.data.email) throw new Error('email enregistré avant vérification');
+  ok('PATCH email : code envoyé, adresse non enregistrée');
+}
+r = await call('GET', '/account/email/pending', undefined, token, 200);
+if (!r.data.pending || r.data.email !== 'verif@example.com') throw new Error('pending KO');
+ok('GET email/pending');
+await call('POST', '/account/email/verify', { code: '000000' }, token, 401);
+ok('verify : mauvais code refusé');
+await call('POST', '/account/email/resend', {}, token, 429);
+ok('resend : délai de 60 s respecté');
+db.prepare('DELETE FROM email_verifications WHERE user_id = ?').run(accountRow.id);
+const testSalt = 'test-salt';
+db.prepare(
+  'INSERT INTO email_verifications (user_id, email, salt, code_hash, expires_at, attempts, created_at) VALUES (?, ?, ?, ?, ?, 0, ?)'
+).run(accountRow.id, 'verif@example.com', testSalt,
+  crypto.createHash('sha256').update(`${testSalt}:123456`).digest('hex'),
+  new Date(Date.now() + 10 * 60 * 1000).toISOString(), nowIso());
+r = await call('POST', '/account/email/verify', { code: '123456' }, token, 200);
+if (r.data.email !== 'verif@example.com') throw new Error('email non enregistré après vérification');
+ok('verify : code valide, email enregistré');
+await call('POST', '/account/email/verify', { code: '123456' }, token, 400);
+ok('verify : code consommé');
+r = await call('PATCH', '/account', { email: '' }, token, 200);
+if (r.data.email !== null) throw new Error('effacement email KO');
+ok('PATCH email : effacement sans vérification');
+
 await call('DELETE', '/account', {}, token, 401);
 await call('DELETE', '/account', { password: 'faux' }, token, 401);
 ok('suppression refuse sans bon mot de passe');
