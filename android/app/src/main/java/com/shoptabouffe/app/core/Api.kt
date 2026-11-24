@@ -40,6 +40,7 @@ import com.shoptabouffe.app.core.models.ProductsResponse
 import com.shoptabouffe.app.core.models.RegisterBody
 import com.shoptabouffe.app.core.models.ResendEmailResponse
 import com.shoptabouffe.app.core.models.SalesResponse
+import com.shoptabouffe.app.core.models.SetDiscountBody
 import com.shoptabouffe.app.core.models.StatusBody
 import com.shoptabouffe.app.core.models.TwoFactorCodeBody
 import com.shoptabouffe.app.core.models.TwoFactorDisableBody
@@ -136,6 +137,13 @@ interface ShopTaBouffeApi {
 
     @DELETE("products/{id}")
     suspend fun deleteProduct(@Path("id") id: Long)
+
+    /** Remise temporaire sur un produit OU une formule (1..168 heures). */
+    @POST("products/{id}/discount")
+    suspend fun setDiscount(@Path("id") id: Long, @Body body: SetDiscountBody): Product
+
+    @DELETE("products/{id}/discount")
+    suspend fun clearDiscount(@Path("id") id: Long): Product
 
     // --- formules (toujours des produits côté galerie) -------------------
     @GET("formules")

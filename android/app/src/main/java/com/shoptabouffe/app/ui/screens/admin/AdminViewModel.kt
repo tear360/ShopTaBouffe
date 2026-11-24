@@ -5,6 +5,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.shoptabouffe.app.core.Api
 import com.shoptabouffe.app.core.ApiResult
+import com.shoptabouffe.app.core.Cart
 import com.shoptabouffe.app.core.SocketManager
 import com.shoptabouffe.app.core.models.Conversation
 import com.shoptabouffe.app.core.models.Category
@@ -14,8 +15,12 @@ import com.shoptabouffe.app.core.models.CreateFormuleLine
 import com.shoptabouffe.app.core.models.CreateProductBody
 import com.shoptabouffe.app.core.models.Order
 import com.shoptabouffe.app.core.models.Product
+import com.shoptabouffe.app.core.models.SetDiscountBody
 import com.shoptabouffe.app.core.models.StatusBody
+import com.shoptabouffe.app.core.eurosToCents
 import com.shoptabouffe.app.core.statusLabel
+import com.shoptabouffe.app.core.toPrice
+import com.shoptabouffe.app.core.toPriceInput
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -42,6 +47,11 @@ data class AdminState(
     val editingFormule: Product? = null,
     val showCategoriesDialog: Boolean = false,
     val confirmDelete: Product? = null,
+    /** Dialogue de remise temporaire (produit ou formule). */
+    val discountProduct: Product? = null,
+    val discountPrice: String = "",
+    val discountHours: String = "24",
+    val discountError: String? = null,
 ) {
     val pendingCount: Int get() = orders.count { it.status == "pending" }
 
@@ -302,6 +312,104 @@ class AdminViewModel(app: Application) : AndroidViewModel(app) {
             available = available,
             items = product.items.map { CreateFormuleLine(it.productId, it.qty) },
         )
+
+    /* ------------------------------------------------- remise temporaire */
+
+    fun openDiscountDialog(product: Product) = _state.update {
+        it.copy(
+            discountProduct = product,
+            discountPrice = (product.discountPriceCents ?: (product.priceCents * 0.9).toInt())
+                .toPriceInput(),
+            discountHours = "24",
+            discountError = null,
+        )
+    }
+
+    fun setDiscountPrice(value: String) = _state.update {
+        it.copy(discountPrice = value, discountError = null)
+    }
+
+    fun setDiscountHours(value: String) = _state.update {
+        it.copy(discountHours = value, discountError = null)
+    }
+
+    fun closeDiscountDialog() = _state.update {
+        it.copy(discountProduct = null, discountError = null)
+    }
+
+    /** POST /products/{id}/discount — validation locale avant appel réseau. */
+    fun setDiscount() {
+        val current = _state.value
+        val product = current.discountProduct ?: return
+        val parsedPrice = current.discountPrice.eurosToCents()
+        val parsedHours = current.discountHours.trim().toIntOrNull()
+        val error = when {
+            parsedPrice == null -> "Saisissez un prix remisé valide."
+            parsedPrice <= 0 || parsedPrice >= product.priceCents ->
+                "Le prix remisé doit être > 0 et inférieur à ${product.priceCents.toPrice()}."
+            parsedHours == null || parsedHours !in 1..168 ->
+                "La durée doit être comprise entre 1 et 168 heures."
+            else -> null
+        }
+        if (error != null) {
+            _state.update { it.copy(discountError = error) }
+            return
+        }
+        val priceCents = parsedPrice ?: return
+        val hours = parsedHours ?: return
+
+        _state.update { it.copy(busy = true, discountError = null) }
+        viewModelScope.launch {
+            when (
+                val result = Api.call {
+                    Api.service.setDiscount(product.id, SetDiscountBody(priceCents, hours))
+                }
+            ) {
+                is ApiResult.Success -> {
+                    Cart.sync(result.data)
+                    _state.update {
+                        it.copy(
+                            busy = false,
+                            discountProduct = null,
+                            discountError = null,
+                            notice = "Remise appliquée à « ${product.name} » · $hours h.",
+                        )
+                    }
+                    loadProducts()
+                }
+
+                is ApiResult.Failure -> _state.update {
+                    it.copy(busy = false, discountError = result.message)
+                }
+            }
+        }
+    }
+
+    /** DELETE /products/{id}/discount — retire la remise active. */
+    fun clearDiscount() {
+        val product = _state.value.discountProduct ?: return
+        _state.update { it.copy(busy = true, discountError = null) }
+        viewModelScope.launch {
+            when (val result = Api.call { Api.service.clearDiscount(product.id) }) {
+                is ApiResult.Success -> {
+                    Cart.sync(result.data)
+                    _state.update {
+                        it.copy(
+                            busy = false,
+                            discountProduct = null,
+                            discountError = null,
+                            notice = "Remise retirée de « ${product.name} ».",
+                        )
+                    }
+                    loadProducts()
+                }
+
+                is ApiResult.Failure -> _state.update {
+                    it.copy(busy = false, discountError = result.message)
+                }
+            }
+        }
+    }
 
     fun deleteProduct(product: Product) {
         _state.update { it.copy(busy = true, confirmDelete = null) }

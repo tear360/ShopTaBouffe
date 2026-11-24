@@ -51,6 +51,7 @@ import com.shoptabouffe.app.core.models.CreateOrderBody
 import com.shoptabouffe.app.core.models.CreateOrderLine
 import com.shoptabouffe.app.core.toPrice
 import com.shoptabouffe.app.ui.components.CartEmptyIcon
+import com.shoptabouffe.app.ui.components.DiscountedPriceText
 import com.shoptabouffe.app.ui.components.EmptyState
 import com.shoptabouffe.app.ui.components.PrimaryButton
 import com.shoptabouffe.app.ui.components.ProductImage
@@ -75,6 +76,7 @@ fun CartScreen(onOrderCreated: (Long) -> Unit, initialPhone: String = "") {
     }
 
     val totalCents = lines.sumOf { it.lineTotalCents }
+    val originalTotalCents = lines.sumOf { it.originalPriceCents * it.qty }
     val addressValid = address.trim().length >= 3
     val phoneValid = phone.trim().filter { it.isLetterOrDigit() }.length >= 6
     val canSend = lines.isNotEmpty() && addressValid && phoneValid && !sending
@@ -118,15 +120,26 @@ fun CartScreen(onOrderCreated: (Long) -> Unit, initialPhone: String = "") {
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis,
                                     )
-                                    Text(
-                                        "${line.product.priceCents.toPrice()} / unité",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                    Text(
-                                        line.lineTotalCents.toPrice(),
-                                        style = MaterialTheme.typography.titleSmall,
-                                        color = MaterialTheme.colorScheme.primary,
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        DiscountedPriceText(
+                                            priceCents = line.product.priceCents,
+                                            discountPriceCents = line.product.discountPriceCents,
+                                            style = MaterialTheme.typography.bodySmall.copy(
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            ),
+                                        )
+                                        Text(
+                                            " / unité",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                    DiscountedPriceText(
+                                        priceCents = line.originalPriceCents * line.qty,
+                                        discountPriceCents = line.lineTotalCents,
+                                        style = MaterialTheme.typography.titleSmall.copy(
+                                            color = MaterialTheme.colorScheme.primary,
+                                        ),
                                     )
                                 }
                                 QuantitySelector(
@@ -164,10 +177,12 @@ fun CartScreen(onOrderCreated: (Long) -> Unit, initialPhone: String = "") {
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
                                 }
-                                Text(
-                                    totalCents.toPrice(),
-                                    style = MaterialTheme.typography.headlineSmall,
-                                    color = MaterialTheme.colorScheme.primary,
+                                DiscountedPriceText(
+                                    priceCents = originalTotalCents,
+                                    discountPriceCents = totalCents,
+                                    style = MaterialTheme.typography.headlineSmall.copy(
+                                        color = MaterialTheme.colorScheme.primary,
+                                    ),
                                 )
                             }
                         }

@@ -41,6 +41,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
@@ -57,6 +58,7 @@ import com.shoptabouffe.app.core.Cart
 import com.shoptabouffe.app.core.models.Product
 import com.shoptabouffe.app.core.toPrice
 import com.shoptabouffe.app.ui.components.EmptyState
+import com.shoptabouffe.app.ui.components.DiscountedPriceText
 import com.shoptabouffe.app.ui.components.ErrorState
 import com.shoptabouffe.app.ui.components.LoadingBox
 import com.shoptabouffe.app.ui.components.PrimaryButton
@@ -75,6 +77,9 @@ fun GalleryScreen(
     val cartLines by Cart.lines.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
+
+    // Le panier suit les remises : apparition, modification ou expiration.
+    LaunchedEffect(state.products) { Cart.sync(state.products) }
 
     Box(modifier = Modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxSize()) {
@@ -280,12 +285,15 @@ private fun ProductSheet(
                     .padding(horizontal = 16.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(
-                    product.priceCents.toPrice(),
-                    style = MaterialTheme.typography.headlineSmall,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.weight(1f),
-                )
+                Box(modifier = Modifier.weight(1f)) {
+                    DiscountedPriceText(
+                        priceCents = product.priceCents,
+                        discountPriceCents = product.discountPriceCents,
+                        style = MaterialTheme.typography.headlineSmall.copy(
+                            color = MaterialTheme.colorScheme.primary,
+                        ),
+                    )
+                }
                 if (product.available && !isSupplier) {
                     QuantitySelector(
                         qty = qty,
@@ -298,7 +306,7 @@ private fun ProductSheet(
             if (product.available && !isSupplier) {
                 Spacer(Modifier.height(16.dp))
                 PrimaryButton(
-                    text = "Ajouter au panier · ${(product.priceCents * qty).toPrice()}",
+                    text = "Ajouter au panier · ${(product.effectivePriceCents * qty).toPrice()}",
                     onClick = { onAdd(qty) },
                     modifier = Modifier
                         .fillMaxWidth()
@@ -384,12 +392,15 @@ private fun ProductCard(
                 )
                 Spacer(Modifier.height(8.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        product.priceCents.toPrice(),
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.weight(1f),
-                    )
+                    Box(modifier = Modifier.weight(1f)) {
+                        DiscountedPriceText(
+                            priceCents = product.priceCents,
+                            discountPriceCents = product.discountPriceCents,
+                            style = MaterialTheme.typography.titleMedium.copy(
+                                color = MaterialTheme.colorScheme.primary,
+                            ),
+                        )
+                    }
                     when {
                         // Un vendeur ne passe pas commande : plus de bouton + sur ses produits.
                         !product.available -> {

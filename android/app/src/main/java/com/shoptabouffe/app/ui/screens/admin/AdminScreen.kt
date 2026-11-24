@@ -90,6 +90,8 @@ import com.shoptabouffe.app.core.toPriceInput
 import com.shoptabouffe.app.core.toShortDateTime
 import com.shoptabouffe.app.core.eurosToCents
 import com.shoptabouffe.app.ui.components.Avatar
+import com.shoptabouffe.app.ui.components.DiscountPriceColor
+import com.shoptabouffe.app.ui.components.DiscountedPriceText
 import com.shoptabouffe.app.ui.components.EmptyState
 import com.shoptabouffe.app.ui.components.ErrorState
 import com.shoptabouffe.app.ui.components.LoadingBox
@@ -221,6 +223,21 @@ fun AdminScreen(onOpenChat: (Long) -> Unit) {
                 onCreate = vm::createCategory,
                 onRename = vm::renameCategory,
                 onDelete = vm::deleteCategory,
+            )
+        }
+
+        state.discountProduct?.let { product ->
+            DiscountDialog(
+                product = product,
+                price = state.discountPrice,
+                hours = state.discountHours,
+                error = state.discountError,
+                saving = state.busy,
+                onPriceChange = vm::setDiscountPrice,
+                onHoursChange = vm::setDiscountHours,
+                onApply = vm::setDiscount,
+                onClear = vm::clearDiscount,
+                onClose = vm::closeDiscountDialog,
             )
         }
 
@@ -465,11 +482,13 @@ private fun ProductsTab(state: AdminState, vm: AdminViewModel) {
                 items(state.products, key = { it.id }) { product ->
                     ProductRow(
                         product = product,
+                        busy = state.busy,
                         onEdit = { vm.openEditor(product) },
                         onDelete = { vm.askDelete(product) },
                         onToggleAvailability = { available ->
                             vm.setAvailability(product, available)
                         },
+                        onDiscount = { vm.openDiscountDialog(product) },
                     )
                 }
             }
@@ -493,9 +512,11 @@ private fun ProductsTab(state: AdminState, vm: AdminViewModel) {
 @Composable
 private fun ProductRow(
     product: Product,
+    busy: Boolean,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
     onToggleAvailability: (Boolean) -> Unit,
+    onDiscount: () -> Unit,
 ) {
     Surface(
         shape = RoundedCornerShape(16.dp),
@@ -521,12 +542,20 @@ private fun ProductRow(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                Text(
-                    "${if (product.isFormule) "Formule · " else ""}" +
-                        "${product.category} · ${product.priceCents.toPrice()}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "${if (product.isFormule) "Formule · " else ""}${product.category} · ",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    DiscountedPriceText(
+                        priceCents = product.priceCents,
+                        discountPriceCents = product.discountPriceCents,
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        ),
+                    )
+                }
                 if (product.isFormule && product.items.isNotEmpty()) {
                     Text(
                         product.items.joinToString(", ") { "${it.qty}× ${it.name ?: it.productId}" },
@@ -543,6 +572,18 @@ private fun ProductRow(
                         color = MaterialTheme.colorScheme.error,
                     )
                 }
+                if (product.discountPriceCents != null) {
+                    Text(
+                        "Remise active · ${product.discountUntil.toShortDateTime()}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = DiscountPriceColor,
+                    )
+                }
+                TextButton(
+                    onClick = onDiscount,
+                    enabled = !busy,
+                    modifier = Modifier.height(28.dp),
+                ) { Text("Remise") }
             }
             Switch(
                 checked = product.available,
@@ -560,6 +601,94 @@ private fun ProductRow(
             }
         }
     }
+}
+
+/** Remise temporaire sur un produit ou une formule (1..168 heures). */
+@Composable
+private fun DiscountDialog(
+    product: Product,
+    price: String,
+    hours: String,
+    error: String?,
+    saving: Boolean,
+    onPriceChange: (String) -> Unit,
+    onHoursChange: (String) -> Unit,
+    onApply: () -> Unit,
+    onClear: () -> Unit,
+    onClose: () -> Unit,
+) {
+    val priceCents = price.eurosToCents()
+    val duration = hours.trim().toIntOrNull()
+    val priceValid = priceCents != null && priceCents > 0 && priceCents < product.priceCents
+    val hoursValid = duration != null && duration in 1..168
+
+    AlertDialog(
+        onDismissRequest = { if (!saving) onClose() },
+        title = {
+            Text(if (product.isFormule) "Remise sur la formule" else "Remise sur le produit")
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    "${product.name} · prix normal ${product.priceCents.toPrice()}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OutlinedTextField(
+                    value = price,
+                    onValueChange = { onPriceChange(it.take(12)) },
+                    label = { Text("Prix remisé (€)") },
+                    supportingText = {
+                        Text(
+                            if (priceValid) {
+                                priceCents?.let { "Nouveau prix : ${it.toPrice()}" }.orEmpty()
+                            } else {
+                                "Entre 0 et ${product.priceCents.toPrice()}"
+                            },
+                        )
+                    },
+                    isError = price.isNotBlank() && !priceValid,
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = hours,
+                    onValueChange = { onHoursChange(it.filter { c -> c.isDigit() }.take(3)) },
+                    label = { Text("Durée (heures)") },
+                    supportingText = { Text("De 1 à 168 heures (7 jours)") },
+                    isError = hours.isNotBlank() && !hoursValid,
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                error?.let {
+                    Text(
+                        it,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onApply, enabled = priceValid && hoursValid && !saving) {
+                Text(if (saving) "Envoi…" else "Appliquer")
+            }
+        },
+        dismissButton = {
+            Row {
+                TextButton(
+                    onClick = onClear,
+                    enabled = !saving,
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = MaterialTheme.colorScheme.error,
+                    ),
+                ) { Text("Retirer la remise") }
+                TextButton(onClick = onClose, enabled = !saving) { Text("Fermer") }
+            }
+        },
+    )
 }
 
 /* ======================================================== conversations === */

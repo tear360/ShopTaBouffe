@@ -10,7 +10,13 @@ data class CartLine(
     val product: Product,
     val qty: Int,
 ) {
-    val lineTotalCents: Int get() = product.priceCents * qty
+    /** Prix normal, conservé pour afficher l'ancien prix barré. */
+    val originalPriceCents: Int get() = product.priceCents
+
+    /** Prix effectivement payé (remise temporaire incluse). */
+    val effectivePriceCents: Int get() = product.discountPriceCents ?: product.priceCents
+
+    val lineTotalCents: Int get() = effectivePriceCents * qty
 }
 
 /** Panier local (mémoire de processus), exposé en StateFlow pour toute l'UI. */
@@ -49,11 +55,17 @@ object Cart {
     }
 
     /** Remplace le produit (utile après un rafraîchissement de la galerie). */
-    fun sync(product: Product) {
+    fun sync(product: Product) = sync(listOf(product))
+
+    /**
+     * Rafraîchit les lignes à partir des produits rechargés : le prix effectif
+     * suit ainsi l'apparition, la modification ou l'expiration d'une remise.
+     */
+    fun sync(products: List<Product>) {
+        if (products.isEmpty()) return
+        val byId = products.associateBy { it.id }
         _lines.update { current ->
-            current.map {
-                if (it.product.id == product.id) it.copy(product = product) else it
-            }
+            current.map { line -> byId[line.product.id]?.let { line.copy(product = it) } ?: line }
         }
     }
 

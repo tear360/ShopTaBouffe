@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { db, nowIso } from '../db.js';
+import { db, nowIso, effectivePriceCents } from '../db.js';
 import { requireAuth, requireSupplier } from '../auth.js';
 import { getIO } from '../sockets.js';
 
@@ -112,7 +112,8 @@ router.post('/', requireAuth, (req, res) => {
     const product = db.prepare('SELECT * FROM products WHERE id = ?').get(line.productId);
     if (!product) return res.status(400).json({ error: `Produit introuvable: ${line.productId}` });
     if (!product.available) return res.status(400).json({ error: `Produit indisponible: ${product.name}` });
-    detailed.push({ ...line, name: product.name, priceCents: product.price_cents });
+    // Prix remisé si la remise est encore active à l'instant de la commande.
+    detailed.push({ ...line, name: product.name, priceCents: effectivePriceCents(product) });
   }
   const total = detailed.reduce((sum, l) => sum + l.priceCents * l.qty, 0);
   const ts = nowIso();

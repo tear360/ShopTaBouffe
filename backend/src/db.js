@@ -237,6 +237,13 @@ if (!productCols.some((c) => c.name === 'cost_cents')) {
 if (!productCols.some((c) => c.name === 'kind')) {
   db.exec("ALTER TABLE products ADD COLUMN kind TEXT NOT NULL DEFAULT 'product'");
 }
+// Remise temporaire : prix proposé et date d'expiration (ISO). NULL = pas de remise.
+if (!productCols.some((c) => c.name === 'discount_price_cents')) {
+  db.exec('ALTER TABLE products ADD COLUMN discount_price_cents INTEGER');
+}
+if (!productCols.some((c) => c.name === 'discount_until')) {
+  db.exec('ALTER TABLE products ADD COLUMN discount_until TEXT');
+}
 
 // Seed des catégories (une seule fois, pas au redémarrage après suppression).
 if (!db.prepare("SELECT value FROM settings WHERE key = 'categories_seeded'").get()) {
@@ -290,15 +297,42 @@ export function formuleItems(formuleId) {
     .map((r) => ({ productId: r.product_id, qty: r.qty, name: r.name }));
 }
 
+/**
+ * Remise active sur un produit/formule, ou null si absente ou expirée.
+ * Le prix normal reste intact en base : l'expiration est donc automatique.
+ */
+export function activeDiscount(row) {
+  if (!row || row.discount_price_cents == null || !row.discount_until) return null;
+  const until = Date.parse(row.discount_until);
+  if (!Number.isFinite(until) || until <= Date.now()) return null;
+  return { priceCents: row.discount_price_cents, until: row.discount_until };
+}
+
+/** Prix réellement payé : prix remisé si la remise est encore valable. */
+export function effectivePriceCents(row) {
+  return activeDiscount(row)?.priceCents ?? row.price_cents;
+}
+
+/** Annule une remise devenue plus chère que le nouveau prix normal. */
+export function pruneDiscount(id, priceCents) {
+  const row = db.prepare('SELECT discount_price_cents FROM products WHERE id = ?').get(id);
+  if (row && row.discount_price_cents != null && row.discount_price_cents >= priceCents) {
+    db.prepare('UPDATE products SET discount_price_cents = NULL, discount_until = NULL WHERE id = ?').run(id);
+  }
+}
+
 /** Ligne products → objet Product (avec `kind` et `items` pour les formules). */
 export function toProduct(row) {
   if (!row) return null;
   const kind = row.kind === 'formule' ? 'formule' : 'product';
+  const discount = activeDiscount(row);
   const out = {
     id: row.id,
     name: row.name,
     description: row.description ?? '',
     priceCents: row.price_cents,
+    discountPriceCents: discount ? discount.priceCents : null,
+    discountUntil: discount ? discount.until : null,
     costCents: row.cost_cents ?? 0,
     category: row.category,
     imageUrl: row.image_url ?? '',

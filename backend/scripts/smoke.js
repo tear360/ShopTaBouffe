@@ -225,6 +225,78 @@ async function runAll() {
     state.products[0] = r.json;
   });
 
+  await step('Remise temporaire produit/formule : validation, calcul, expiration', async () => {
+    const p = state.products[0];
+    const normal = p.priceCents;
+    const sale = Math.floor(normal / 2);
+    const orderBody = (productId, qty) => ({
+      items: [{ productId, qty }],
+      address: '12 rue des Lilas, Paris',
+      phone: '0612345678',
+    });
+
+    const anon = await api('POST', `/api/products/${p.id}/discount`, { body: { priceCents: sale, durationHours: 24 } });
+    assert(anon.status === 401, `POST discount sans token = ${anon.status}`);
+    const forbidden = await api('POST', `/api/products/${p.id}/discount`, { token: state.tokenB, body: { priceCents: sale, durationHours: 24 } });
+    assert(forbidden.status === 403, `POST discount client = ${forbidden.status}`);
+    const invalid = await api('POST', `/api/products/${p.id}/discount`, { token: state.tokenA, body: { priceCents: normal, durationHours: 24 } });
+    assert(invalid.status === 400, `prix remisé = prix normal → ${invalid.status}`);
+    const badHours = await api('POST', `/api/products/${p.id}/discount`, { token: state.tokenA, body: { priceCents: sale, durationHours: 0 } });
+    assert(badHours.status === 400, `durée 0 → ${badHours.status}`);
+
+    const set = await api('POST', `/api/products/${p.id}/discount`, { token: state.tokenA, body: { priceCents: sale, durationHours: 24 } });
+    assert(set.status === 200, `status ${set.status} ${set.text}`);
+    assert(set.json.discountPriceCents === sale, `discountPriceCents = ${set.json.discountPriceCents}`);
+    assert(set.json.priceCents === normal, 'prix normal écrasé par la remise');
+    assert(set.json.discountUntil && Date.parse(set.json.discountUntil) > Date.now(), 'discountUntil invalide');
+
+    const discounted = await api('POST', '/api/orders', { token: state.tokenA, body: orderBody(p.id, 2) });
+    assert(discounted.status === 201, `commande remisée ${discounted.status}`);
+    assert(discounted.json.totalCents === sale * 2, `total remisé ${discounted.json.totalCents} attendu ${sale * 2}`);
+    assert(discounted.json.items[0].priceCents === sale, 'prix de ligne non remisé');
+
+    // Expiration simulée : le prix normal reprend sans intervention.
+    db.prepare('UPDATE products SET discount_until = ? WHERE id = ?')
+      .run(new Date(Date.now() - 1000).toISOString(), p.id);
+    const expired = await api('GET', `/api/products/${p.id}`);
+    assert(expired.json.discountPriceCents === null && expired.json.discountUntil === null, 'remise expirée encore exposée');
+    const full = await api('POST', '/api/orders', { token: state.tokenA, body: orderBody(p.id, 1) });
+    assert(full.status === 201 && full.json.totalCents === normal, `prix après expiration ${full.json.totalCents} attendu ${normal}`);
+
+    // Une formule est un produit : même endpoint, même recalcul.
+    const created = await api('POST', '/api/formules', {
+      token: state.tokenA,
+      body: {
+        name: `SmokeFormule ${Date.now().toString(36)}`,
+        description: '',
+        priceCents: 1000,
+        category: 'Formules',
+        items: [{ productId: p.id, qty: 1 }],
+        available: true,
+      },
+    });
+    assert(created.status === 201, `création formule ${created.status} ${created.text}`);
+    const f = created.json;
+    const fSale = 700;
+    const fSet = await api('POST', `/api/products/${f.id}/discount`, { token: state.tokenA, body: { priceCents: fSale, durationHours: 2 } });
+    assert(fSet.status === 200 && fSet.json.discountPriceCents === fSale, `remise formule ${fSet.status}`);
+    const fOrder = await api('POST', '/api/orders', { token: state.tokenA, body: orderBody(f.id, 1) });
+    assert(fOrder.status === 201 && fOrder.json.totalCents === fSale, `commande formule remisée ${fOrder.json.totalCents}`);
+
+    const clearedF = await api('DELETE', `/api/products/${f.id}/discount`, { token: state.tokenA });
+    assert(clearedF.status === 200 && clearedF.json.discountPriceCents === null, `DELETE remise formule ${clearedF.status}`);
+    const clearedP = await api('DELETE', `/api/products/${p.id}/discount`, { token: state.tokenA });
+    assert(clearedP.status === 200 && clearedP.json.discountPriceCents === null, `DELETE remise produit ${clearedP.status}`);
+
+    // Nettoyage : ces commandes restent pending (aucune vente journalisée).
+    for (const id of [discounted.json.id, full.json.id, fOrder.json.id]) {
+      db.prepare('DELETE FROM order_items WHERE order_id = ?').run(id);
+      db.prepare('DELETE FROM orders WHERE id = ?').run(id);
+    }
+    db.prepare('DELETE FROM formule_items WHERE formule_id = ?').run(f.id);
+    db.prepare('DELETE FROM products WHERE id = ?').run(f.id);
+  });
+
   await step('PATCH /api/orders/:id (transitions strictes + 409 + 403)', async () => {
     const id = state.order.id;
     const patch = (status, token = state.tokenA) =>

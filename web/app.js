@@ -146,6 +146,20 @@ function euro(cents) {
   return (Number(cents || 0) / 100).toFixed(2).replace('.', ',') + ' €';
 }
 
+/** Prix effectivement payé : la remise si elle est active, sinon le prix normal. */
+function effectivePriceCents(p) {
+  if (p && p.discountPriceCents != null) return Number(p.discountPriceCents);
+  return Number((p && p.priceCents) || 0);
+}
+
+/** Affichage d'un prix : ancien prix barré et nouveau prix fluo si remise active. */
+function priceLabel(p) {
+  if (p && p.discountPriceCents != null) {
+    return `<span class="price-wrap"><span class="price-old">${euro(p.priceCents)}</span><span class="price-new">${euro(p.discountPriceCents)}</span></span>`;
+  }
+  return `<span class="price">${euro(p ? p.priceCents : 0)}</span>`;
+}
+
 function fmtDate(iso) {
   if (!iso) return '';
   try {
@@ -560,7 +574,7 @@ function productCard(p) {
       </div>
       <div class="desc">${h(p.description || '')}</div>
       <div class="row">
-        <span class="price">${euro(p.priceCents)}</span>
+        ${priceLabel(p)}
         ${!p.available ? `<span class="tag off">Indisponible</span>` : (isSupplier() ? '' : (line ? `
           <span class="qty-box">
             <button data-action="cart-dec" data-id="${p.id}" aria-label="Retirer">−</button>
@@ -612,7 +626,41 @@ function viewGallery() {
 
 function cartTotal() { return state.cart.reduce((n, l) => n + l.priceCents * l.qty, 0); }
 
+/** Met à jour les lignes du panier dès que le produit est connu (remise expirée ou modifiée). */
+function refreshCartPrices() {
+  let changed = false;
+  state.cart.forEach((l) => {
+    const p = state.products.find((x) => x.id === l.productId);
+    if (!p) return;
+    const price = effectivePriceCents(p);
+    const old = p.discountPriceCents != null ? Number(p.priceCents) : null;
+    if (l.priceCents !== price || (l.oldPriceCents == null ? null : l.oldPriceCents) !== old) {
+      l.priceCents = price;
+      if (old != null) l.oldPriceCents = old;
+      else delete l.oldPriceCents;
+      changed = true;
+    }
+  });
+  if (changed) saveCart();
+}
+
+function cartPriceLabel(l) {
+  return priceLabel(l.oldPriceCents != null && l.oldPriceCents !== l.priceCents
+    ? { priceCents: l.oldPriceCents, discountPriceCents: l.priceCents }
+    : { priceCents: l.priceCents });
+}
+
+function cartTotalLabel() {
+  const total = cartTotal();
+  const oldTotal = state.cart.reduce(
+    (n, l) => n + (l.oldPriceCents != null ? l.oldPriceCents : l.priceCents) * l.qty, 0);
+  return priceLabel(oldTotal > total
+    ? { priceCents: oldTotal, discountPriceCents: total }
+    : { priceCents: total });
+}
+
 function viewCart() {
+  refreshCartPrices();
   if (state.cart.length === 0) {
     return `
     <div class="view-title">Panier</div>
@@ -632,7 +680,7 @@ function viewCart() {
           <div class="thumb">${l.imageUrl ? `<img src="${h(l.imageUrl)}" alt="" />` : emojiFor(l.category)}</div>
           <div class="info">
             <div class="nm">${h(l.name)}</div>
-            <div class="sub">${euro(l.priceCents)} × ${l.qty} = <strong>${euro(l.priceCents * l.qty)}</strong></div>
+            <div class="sub">${cartPriceLabel(l)} × ${l.qty} = <strong>${euro(l.priceCents * l.qty)}</strong></div>
           </div>
           <span class="qty-box">
             <button data-action="cart-dec" data-id="${l.productId}">−</button>
@@ -661,7 +709,7 @@ function viewCart() {
           <label for="ord-note">Note (optionnel)</label>
           <textarea id="ord-note" name="note" maxlength="500" placeholder="Sans oignons, sonner deux fois…"></textarea>
         </div>
-        <div class="total-row"><span>Total</span><span class="price">${euro(cartTotal())}</span></div>
+        <div class="total-row"><span>Total</span>${cartTotalLabel()}</div>
         <button class="btn" type="submit">Commander</button>
       </form>
     </div>
@@ -1318,9 +1366,10 @@ function viewAdmin() {
           <div class="thumb">${p.imageUrl ? `<img src="${h(p.imageUrl)}" alt="" />` : emojiFor(p.category)}</div>
           <div class="info">
             <div class="nm">${h(p.name)} ${p.kind === 'formule' ? '<span class="tag formule">Formule</span>' : ''} ${p.available ? '' : '<span class="tag off">Indisponible</span>'}</div>
-            <div class="sub">${euro(p.priceCents)} · ${h(p.category)}</div>
+            <div class="sub">${priceLabel(p)} · ${h(p.category)}</div>
           </div>
           <div class="acts">
+            <button class="btn btn-ghost btn-sm" data-action="discount-open" data-id="${p.id}">${ICONS.tag} Remise</button>
             <button class="btn btn-ghost btn-sm" data-action="product-edit" data-id="${p.id}"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>
             <button class="btn btn-danger btn-sm" data-action="product-del" data-id="${p.id}"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg></button>
           </div>
@@ -1813,6 +1862,105 @@ function openProductModal(product) {
   });
 }
 
+/* ---------------- Modale remise temporaire ---------------- */
+
+function openDiscountModal(product) {
+  const p = product;
+  const active = p.discountPriceCents != null;
+  const backdrop = document.createElement('div');
+  backdrop.className = 'modal-backdrop';
+  backdrop.innerHTML = `
+    <div class="modal" role="dialog" aria-modal="true">
+      <h3>Remise temporaire</h3>
+      <div class="info-box">
+        <strong>${h(p.name)}</strong>${p.kind === 'formule' ? ' <span class="tag formule">Formule</span>' : ''}<br />
+        Prix normal : ${euro(p.priceCents)}
+        ${active ? `<br />Remise en cours : ${euro(p.discountPriceCents)} jusqu’au ${h(fmtDate(p.discountUntil))}` : ''}
+      </div>
+      <form id="discount-form">
+        <div class="field">
+          <label for="d-price">Prix remisé (€)</label>
+          <input id="d-price" name="price" type="number" min="0.01" step="0.01" required
+                 value="${active ? (Number(p.discountPriceCents) / 100).toFixed(2) : ''}"
+                 placeholder="${(Number(p.priceCents) / 100).toFixed(2)}" />
+          <span class="field-hint">Supérieur à 0 et inférieur au prix normal (${euro(p.priceCents)}).</span>
+        </div>
+        <div class="field">
+          <label for="d-hours">Durée (heures)</label>
+          <input id="d-hours" name="hours" type="number" min="1" max="168" step="1" required value="24" />
+          <span class="field-hint">Nombre entier de 1 à 168 heures.</span>
+        </div>
+        <div class="error-box" id="d-error" hidden></div>
+        <div class="actions">
+          <button class="btn btn-ghost" type="button" data-close>Fermer</button>
+          ${active ? '<button class="btn btn-danger" type="button" data-remove>Retirer la remise</button>' : ''}
+          <button class="btn" type="submit">Appliquer</button>
+        </div>
+      </form>
+    </div>`;
+  document.body.appendChild(backdrop);
+
+  const close = () => backdrop.remove();
+  const showError = (message) => {
+    const box = $('#d-error', backdrop);
+    box.textContent = message;
+    box.hidden = false;
+  };
+  backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); });
+  $('[data-close]', backdrop).addEventListener('click', close);
+
+  const reload = async (message) => {
+    close();
+    await loadAdminProducts();
+    if (typeof loadProducts === 'function') await loadProducts();
+    refreshCartPrices();
+    render();
+    toast(message, 'ok');
+  };
+
+  $('#discount-form', backdrop).addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const price = Number(fd.get('price'));
+    const priceCents = Math.round(price * 100);
+    const hours = Number(fd.get('hours'));
+    $('#d-error', backdrop).hidden = true;
+    if (!Number.isFinite(price) || priceCents <= 0 || priceCents >= Number(p.priceCents)) {
+      showError('Le prix remisé doit être supérieur à 0 et inférieur au prix normal (' + euro(p.priceCents) + ').');
+      return;
+    }
+    if (!Number.isInteger(hours) || hours < 1 || hours > 168) {
+      showError('La durée doit être un nombre entier compris entre 1 et 168 heures.');
+      return;
+    }
+    const btn = $('button[type="submit"]', backdrop);
+    btn.disabled = true;
+    try {
+      await api('/products/' + p.id + '/discount', {
+        method: 'POST',
+        body: { priceCents, durationHours: hours },
+      });
+      await reload('Remise appliquée');
+    } catch (err) {
+      btn.disabled = false;
+      showError(err.message || 'Impossible d’appliquer la remise.');
+    }
+  });
+
+  const removeBtn = $('[data-remove]', backdrop);
+  if (removeBtn) removeBtn.addEventListener('click', async () => {
+    removeBtn.disabled = true;
+    $('#d-error', backdrop).hidden = true;
+    try {
+      await api('/products/' + p.id + '/discount', { method: 'DELETE' });
+      await reload('Remise retirée');
+    } catch (err) {
+      removeBtn.disabled = false;
+      showError(err.message || 'Impossible de retirer la remise.');
+    }
+  });
+}
+
 /* ---------------- Chargements de données ---------------- */
 
 async function loadProducts() {
@@ -2026,7 +2174,12 @@ function connectSocket() {
   });
 
   socket.on('product:changed', () => {
-    if (state.view === 'gallery') loadProducts().then(render);
+    if (state.view === 'gallery') {
+      loadProducts().then(() => { refreshCartPrices(); render(); });
+    } else {
+      refreshCartPrices();
+      if (state.view === 'cart') render();
+    }
     if (isSupplier() && state.adminTab === 'products') loadAdminProducts().then(render);
   });
 
@@ -2123,12 +2276,22 @@ async function refresh() {
 function cartAdd(productId) {
   const p = state.products.find((x) => x.id === productId);
   if (!p || !p.available) return;
+  const price = effectivePriceCents(p);
+  const old = p.discountPriceCents != null ? Number(p.priceCents) : null;
   const line = state.cart.find((l) => l.productId === productId);
-  if (line) line.qty = Math.min(99, line.qty + 1);
-  else state.cart.push({
-    productId: p.id, name: p.name, priceCents: p.priceCents,
-    imageUrl: p.imageUrl || '', category: p.category, qty: 1,
-  });
+  if (line) {
+    line.qty = Math.min(99, line.qty + 1);
+    line.priceCents = price;
+    if (old != null) line.oldPriceCents = old;
+    else delete line.oldPriceCents;
+  } else {
+    const item = {
+      productId: p.id, name: p.name, priceCents: price,
+      imageUrl: p.imageUrl || '', category: p.category, qty: 1,
+    };
+    if (old != null) item.oldPriceCents = old;
+    state.cart.push(item);
+  }
   saveCart();
 }
 
@@ -2193,6 +2356,9 @@ document.addEventListener('click', async (e) => {
       render();
     } else if (action === 'create-open') {
       openCreateModal();
+    } else if (action === 'discount-open') {
+      const p = state.adminProducts.find((x) => x.id === id);
+      if (p) openDiscountModal(p);
     } else if (action === 'fin-apply') {
       const fromEl = $('#fin-from');
       const toEl = $('#fin-to');

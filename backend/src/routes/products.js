@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { db, toProduct, nowIso } from '../db.js';
+import { db, toProduct, nowIso, pruneDiscount } from '../db.js';
 import { requireAuth, requireSupplier } from '../auth.js';
 import { getIO } from '../sockets.js';
 
@@ -136,7 +136,47 @@ router.patch('/:id', requireAuth, requireSupplier, (req, res) => {
   const sets = keys.map((k) => `${columnFor[k]} = ?`);
   const values = keys.map((k) => (k === 'available' ? (fields.available ? 1 : 0) : fields[k]));
   db.prepare(`UPDATE products SET ${sets.join(', ')} WHERE id = ?`).run(...values, existing.id);
+  if (fields.priceCents != null) pruneDiscount(existing.id, fields.priceCents);
   const product = toProduct(db.prepare('SELECT * FROM products WHERE id = ?').get(existing.id));
+  emitProduct('updated', product);
+  return res.json(product);
+});
+
+/**
+ * Remise temporaire sur un produit OU une formule (même table `products`).
+ * Le prix normal est conservé : la remise expire toute seule à `discount_until`.
+ * POST /api/products/:id/discount  { priceCents, durationHours }
+ * DELETE /api/products/:id/discount
+ */
+router.post('/:id/discount', requireAuth, requireSupplier, (req, res) => {
+  const existing = findProduct(req.params.id);
+  if (!existing) return res.status(404).json({ error: 'Produit introuvable' });
+  const body = req.body && typeof req.body === 'object' ? req.body : {};
+  const errors = [];
+  const priceCents = body.priceCents;
+  const max = existing.price_cents - 1;
+  if (!Number.isInteger(priceCents) || priceCents < 1 || priceCents > max) {
+    errors.push(`priceCents: entier entre 1 et ${Math.max(0, max)}`);
+  }
+  const durationHours = body.durationHours;
+  if (!Number.isInteger(durationHours) || durationHours < 1 || durationHours > 168) {
+    errors.push('durationHours: entier entre 1 et 168');
+  }
+  if (errors.length) return res.status(400).json({ error: `Remise invalide: ${errors.join(', ')}` });
+  const until = new Date(Date.now() + durationHours * 3600 * 1000).toISOString();
+  db.prepare('UPDATE products SET discount_price_cents = ?, discount_until = ? WHERE id = ?')
+    .run(priceCents, until, existing.id);
+  const product = toProduct(findProduct(existing.id));
+  emitProduct('updated', product);
+  return res.json(product);
+});
+
+router.delete('/:id/discount', requireAuth, requireSupplier, (req, res) => {
+  const existing = findProduct(req.params.id);
+  if (!existing) return res.status(404).json({ error: 'Produit introuvable' });
+  db.prepare('UPDATE products SET discount_price_cents = NULL, discount_until = NULL WHERE id = ?')
+    .run(existing.id);
+  const product = toProduct(findProduct(existing.id));
   emitProduct('updated', product);
   return res.json(product);
 });

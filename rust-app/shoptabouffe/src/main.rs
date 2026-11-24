@@ -12,7 +12,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 const API_BASE: &str = "https://chorizo.dpdns.org/api";
-const APP_VERSION: &str = "1.0.15";
+const APP_VERSION: &str = "1.0.16";
 
 /* ------------------------------------------------------- palette (Theme.kt) */
 
@@ -22,6 +22,8 @@ const GREY: egui::Color32 = egui::Color32::from_rgb(31, 34, 43); // #1F222B
 const TEXT: egui::Color32 = egui::Color32::from_rgb(243, 244, 248); // #F3F4F8
 const MUTED: egui::Color32 = egui::Color32::from_rgb(155, 163, 178); // #9BA3B2
 const ORANGE: egui::Color32 = egui::Color32::from_rgb(239, 108, 51); // #EF6C33
+/// Nouveau prix remisé : orange fluo brillant.
+const ORANGE_FLUO: egui::Color32 = egui::Color32::from_rgb(255, 154, 77); // #FF9A4D
 const GREEN: egui::Color32 = egui::Color32::from_rgb(52, 211, 153); // #34D399
 const RED: egui::Color32 = egui::Color32::from_rgb(255, 107, 107); // #FF6B6B
 const AMBER: egui::Color32 = egui::Color32::from_rgb(255, 194, 75); // #FFC24B
@@ -83,12 +85,74 @@ struct Product {
     /// Renseigné par le serveur pour les formules : [{productId, qty, name}].
     #[serde(default)]
     items: Vec<FormuleItem>,
+    /// Remise temporaire active (null si aucune remise ou remise expirée).
+    #[serde(rename = "discountPriceCents", default)]
+    discount_price_cents: Option<i64>,
+    /// Date/heure d'expiration renvoyée par le serveur (information only).
+    #[serde(rename = "discountUntil", default)]
+    discount_until: Option<String>,
 }
 
 impl Product {
     fn is_formule(&self) -> bool {
         self.kind == "formule" || !self.items.is_empty()
     }
+
+    /// Prix réellement à payer : prix remisé si une remise est active.
+    fn effective_price_cents(&self) -> i64 {
+        self.discount_price_cents.unwrap_or(self.price_cents)
+    }
+
+    fn has_discount(&self) -> bool {
+        self.discount_price_cents.is_some() && self.discount_price_cents != Some(self.price_cents)
+    }
+}
+
+/// Affiche le prix d'un produit : ancien prix barré (gris + barre orange) puis
+/// nouveau prix en orange fluo brillant lorsqu'une remise est active.
+/// Zéro emoji.
+fn discount_price_ui(ui: &mut egui::Ui, product: &Product, old_size: f32, new_size: f32) {
+    if !product.has_discount() {
+        ui.label(
+            egui::RichText::new(cents(product.price_cents))
+                .size(new_size)
+                .color(TEXT),
+        );
+        return;
+    }
+
+    let mut job = egui::text::LayoutJob::default();
+    // Ancien prix : texte gris, trait orange bien visible.
+    job.append(
+        &cents(product.price_cents),
+        0.0,
+        egui::text::TextFormat {
+            font_id: egui::FontId::proportional(old_size),
+            color: MUTED,
+            strikethrough: egui::Stroke::new(2.0_f32, ORANGE),
+            ..Default::default()
+        },
+    );
+    job.append(
+        "  ",
+        0.0,
+        egui::text::TextFormat {
+            font_id: egui::FontId::proportional(new_size),
+            color: MUTED,
+            ..Default::default()
+        },
+    );
+    // Nouveau prix : orange fluo, « strong » par la couleur + taille plus grande.
+    job.append(
+        &cents(product.effective_price_cents()),
+        0.0,
+        egui::text::TextFormat {
+            font_id: egui::FontId::proportional(new_size),
+            color: ORANGE_FLUO,
+            ..Default::default()
+        },
+    );
+    ui.label(job);
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
@@ -417,6 +481,13 @@ struct ShopApp {
     form_image_path: String,
     new_form_items: Vec<FormuleItem>,
 
+    // Mini-panneau « Remise temporaire » (produit ou formule, côté fournisseur).
+    discount_open: bool,
+    discount_id: Option<i64>,
+    discount_name: String,
+    discount_price: String,
+    discount_hours: i64,
+
     order_address: String,
     order_phone: String,
     order_note: String,
@@ -589,6 +660,11 @@ impl Default for ShopApp {
             new_form_image: String::new(),
             form_image_path: String::new(),
             new_form_items: vec![],
+            discount_open: false,
+            discount_id: None,
+            discount_name: String::new(),
+            discount_price: String::new(),
+            discount_hours: 24,
             order_address: String::new(),
             order_phone: String::new(),
             order_note: String::new(),
@@ -1541,6 +1617,48 @@ fn update_product(
     });
 }
 
+/// POST /api/products/{id}/discount — remise temporaire (produit OU formule).
+fn set_discount(tx: Sender<Msg>, token: String, id: i64, price_cents: i64, duration_hours: i64) {
+    thread::spawn(move || {
+        let body = serde_json::json!({
+            "priceCents": price_cents,
+            "durationHours": duration_hours,
+        });
+        match http_call(
+            reqwest::Method::POST,
+            format!("{}/products/{}/discount", API_BASE, id),
+            Some(token.clone()),
+            Some(body),
+            None,
+        ) {
+            Ok(_) => {
+                let _ = tx.send(Msg::Notice("Remise appliquée".into()));
+                fetch_products(tx.clone(), Some(token));
+            }
+            Err(e) => forward_err(&tx, e),
+        }
+    });
+}
+
+/// DELETE /api/products/{id}/discount — retire la remise en cours.
+fn clear_discount(tx: Sender<Msg>, token: String, id: i64) {
+    thread::spawn(move || {
+        match http_call(
+            reqwest::Method::DELETE,
+            format!("{}/products/{}/discount", API_BASE, id),
+            Some(token.clone()),
+            None,
+            None,
+        ) {
+            Ok(_) => {
+                let _ = tx.send(Msg::Notice("Remise retirée".into()));
+                fetch_products(tx.clone(), Some(token));
+            }
+            Err(e) => forward_err(&tx, e),
+        }
+    });
+}
+
 fn delete_product(tx: Sender<Msg>, token: String, id: i64) {
     thread::spawn(move || {
         match http_call(
@@ -2184,6 +2302,7 @@ impl ShopApp {
         self.category_form_open = false;
         self.formule_form_open = false;
         self.formule_editing_id = None;
+        self.reset_discount_form();
         self.expanded_order = None;
         self.login_tab = 0;
         self.login_username.clear();
@@ -2241,6 +2360,7 @@ impl ShopApp {
         self.new_prod_available = true;
         self.new_prod_image.clear();
         self.image_path.clear();
+        self.reset_discount_form();
     }
 
     fn reset_formule_form(&mut self) {
@@ -2253,6 +2373,16 @@ impl ShopApp {
         self.new_form_image.clear();
         self.form_image_path.clear();
         self.new_form_items.clear();
+        self.reset_discount_form();
+    }
+
+    /// Ferme le mini-panneau de remise et vide ses champs.
+    fn reset_discount_form(&mut self) {
+        self.discount_open = false;
+        self.discount_id = None;
+        self.discount_name.clear();
+        self.discount_price.clear();
+        self.discount_hours = 24;
     }
 
     /// Vignette produit (cache d'images téléchargées en arrière-plan).
@@ -2578,15 +2708,14 @@ impl ShopApp {
                             ui.add_space(10.0);
                             ui.vertical(|ui| {
                                 ui.label(egui::RichText::new(&p.name).strong().size(15.0).color(TEXT));
-                                ui.label(
-                                    egui::RichText::new(format!(
-                                        "{}  ·  {}",
-                                        p.category,
-                                        cents(p.price_cents)
-                                    ))
-                                    .color(MUTED)
-                                    .size(12.0),
-                                );
+                                ui.horizontal(|ui| {
+                                    ui.label(
+                                        egui::RichText::new(&p.category)
+                                            .color(MUTED)
+                                            .size(12.0),
+                                    );
+                                    discount_price_ui(ui, &p, 11.0, 12.0);
+                                });
                                 if p.is_formule() {
                                     egui::Frame::new()
                                         .fill(alpha(PURPLE, 40))
@@ -2680,6 +2809,7 @@ impl ShopApp {
         }
 
         let mut total: i64 = 0;
+        let mut has_discount = false;
         let mut remove: Option<usize> = None;
         let mut bump: Option<usize> = None;
         let mut drop: Option<usize> = None;
@@ -2698,23 +2828,20 @@ impl ShopApp {
                                         .size(15.0)
                                         .color(TEXT),
                                 );
-                                ui.label(
-                                    egui::RichText::new(cents(line.product.price_cents))
-                                        .color(MUTED)
-                                        .size(12.0),
-                                );
+                                discount_price_ui(ui, &line.product, 11.0, 12.0);
                             });
                             ui.with_layout(
                                 egui::Layout::right_to_left(egui::Align::Center),
                                 |ui| {
-                                    ui.label(
-                                        egui::RichText::new(cents(
-                                            line.product.price_cents * line.qty,
-                                        ))
-                                        .strong()
-                                        .size(14.0)
-                                        .color(TEXT),
-                                    );
+                                    // Le total de la ligne suit le prix effectif (remisé).
+                                    let mut line_price = line.product.clone();
+                                    line_price.price_cents =
+                                        line.product.price_cents * line.qty;
+                                    line_price.discount_price_cents = line
+                                        .product
+                                        .discount_price_cents
+                                        .map(|d| d * line.qty);
+                                    discount_price_ui(ui, &line_price, 12.0, 14.0);
                                     ui.add_space(8.0);
                                     if icon_btn(
                                         ui,
@@ -2746,7 +2873,10 @@ impl ShopApp {
                         });
                     });
                     ui.add_space(8.0);
-                    total += line.product.price_cents * line.qty;
+                    if line.product.has_discount() {
+                        has_discount = true;
+                    }
+                    total += line.product.effective_price_cents() * line.qty;
                 }
             });
 
@@ -2772,7 +2902,7 @@ impl ShopApp {
                         egui::RichText::new(cents(total))
                             .size(20.0)
                             .strong()
-                            .color(ORANGE),
+                            .color(if has_discount { ORANGE_FLUO } else { ORANGE }),
                     );
                 });
             });
@@ -3426,16 +3556,18 @@ impl ShopApp {
                                         );
                                     }
                                 });
-                                ui.label(
-                                    egui::RichText::new(format!(
-                                        "{}  ·  vente {}  ·  coût {}",
-                                        p.category,
-                                        cents(p.price_cents),
-                                        cents(p.cost_cents)
-                                    ))
-                                    .color(MUTED)
-                                    .size(11.0),
-                                );
+                                ui.horizontal(|ui| {
+                                    ui.label(
+                                        egui::RichText::new(format!(
+                                            "{}  ·  coût {}",
+                                            p.category,
+                                            cents(p.cost_cents)
+                                        ))
+                                        .color(MUTED)
+                                        .size(11.0),
+                                    );
+                                    discount_price_ui(ui, &p, 10.0, 12.0);
+                                });
                                 if !p.available {
                                     ui.label(
                                         egui::RichText::new("Indisponible")
@@ -3496,6 +3628,18 @@ impl ShopApp {
                                             self.formule_form_open = false;
                                             self.product_form_open = true;
                                         }
+                                    }
+                                    ui.add_space(6.0);
+                                    // Remise temporaire : produit OU formule.
+                                    if btn_ghost(ui, "Remise").clicked() {
+                                        self.discount_open = true;
+                                        self.discount_id = Some(p.id);
+                                        self.discount_name = p.name.clone();
+                                        self.discount_price = format!(
+                                            "{:.2}",
+                                            p.effective_price_cents() as f64 / 100.0
+                                        );
+                                        self.discount_hours = 24;
                                     }
                                 },
                             );
@@ -4416,7 +4560,19 @@ impl eframe::App for ShopApp {
                         }
                     }
                 }
-                Msg::Products(p) => self.products = p,
+                Msg::Products(p) => {
+                    self.products = p;
+                    // Garde le panier cohérent avec les remises reçues du serveur.
+                    for line in &mut self.cart {
+                        if let Some(fresh) =
+                            self.products.iter().find(|x| x.id == line.product.id)
+                        {
+                            line.product.price_cents = fresh.price_cents;
+                            line.product.discount_price_cents = fresh.discount_price_cents;
+                            line.product.discount_until = fresh.discount_until.clone();
+                        }
+                    }
+                }
                 Msg::Account(a) => {
                     // Garde le header et le formulaire de commande synchronisés.
                     let previous_phone = self
@@ -4893,6 +5049,11 @@ impl eframe::App for ShopApp {
         // Petit dialogue de création (produit / formule / catégorie).
         if self.create_menu {
             self.draw_create_modal(ctx);
+        }
+
+        // Remise temporaire sur un produit ou une formule (espace fournisseur).
+        if self.discount_open {
+            self.draw_discount_modal(ctx);
         }
 
         // Gestion du compte : modale bloquante ouverte depuis le profil.
@@ -5748,6 +5909,90 @@ impl ShopApp {
                             });
                     });
             });
+    }
+
+    /// Mini-panneau « Remise temporaire » ouvert depuis une carte du catalogue.
+    /// Fonctionne indifféremment pour un produit ou une formule.
+    fn draw_discount_modal(&mut self, ctx: &egui::Context) {
+        let mut open = self.discount_open;
+        let mut close_clicked = false;
+        let mut apply = false;
+        let mut clear = false;
+        let id = self.discount_id.unwrap_or_default();
+        let name = self.discount_name.clone();
+
+        egui::Window::new("Remise temporaire")
+            .open(&mut open)
+            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+            .collapsible(false)
+            .resizable(false)
+            .show(ctx, |ui| {
+                ui.set_min_width(320.0);
+                ui.label(egui::RichText::new(&name).strong().size(15.0).color(TEXT));
+                ui.add_space(8.0);
+
+                ui.label(
+                    egui::RichText::new("Prix remisé (euros)")
+                        .color(MUTED)
+                        .size(12.0),
+                );
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.discount_price)
+                        .hint_text("9,99")
+                        .margin(egui::Margin::same(10)),
+                );
+                ui.add_space(8.0);
+
+                ui.horizontal(|ui| {
+                    ui.label(
+                        egui::RichText::new("Durée (heures)")
+                            .color(MUTED)
+                            .size(12.0),
+                    );
+                    ui.add(egui::DragValue::new(&mut self.discount_hours).range(1..=168));
+                });
+                ui.add_space(10.0);
+
+                ui.horizontal(|ui| {
+                    if btn_primary(ui, "Appliquer").clicked() {
+                        apply = true;
+                    }
+                    if btn_ghost(ui, "Retirer la remise").clicked() {
+                        clear = true;
+                    }
+                    if btn_ghost(ui, "Fermer").clicked() {
+                        close_clicked = true;
+                    }
+                });
+                ui.add_space(6.0);
+                ui.label(
+                    egui::RichText::new(
+                        "La remise expire automatiquement après la durée choisie.",
+                    )
+                    .color(alpha(MUTED, 200))
+                    .size(11.0),
+                );
+            });
+
+        self.discount_open = open && !close_clicked;
+        if !self.discount_open {
+            self.discount_id = None;
+        }
+        if apply {
+            if let Some(t) = self.token.clone() {
+                let price_cents = euros_to_cents(&self.discount_price);
+                if price_cents <= 0 {
+                    self.set_notice("Prix remisé invalide.");
+                } else {
+                    set_discount(self.tx.clone(), t, id, price_cents, self.discount_hours);
+                }
+            }
+        }
+        if clear {
+            if let Some(t) = self.token.clone() {
+                clear_discount(self.tx.clone(), t, id);
+            }
+        }
     }
 
     /// Dialogue léger ouvert par le bouton « Créer » de l'espace fournisseur.

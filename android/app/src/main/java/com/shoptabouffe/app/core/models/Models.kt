@@ -134,9 +134,18 @@ data class Product(
     val createdAt: String? = null,
     val kind: String = "product",
     val items: List<FormuleItem> = emptyList(),
+    /** Remise temporaire active (null si aucune remise ou si elle a expiré). */
+    @SerializedName("discountPriceCents") val discountPriceCents: Int? = null,
+    @SerializedName("discountUntil") val discountUntil: String? = null,
 ) {
     val isFormule: Boolean get() = kind == "formule"
+
+    /** Prix payé par le client : prix remisé si une remise est active. */
+    val effectivePriceCents: Int get() = discountPriceCents ?: priceCents
 }
+
+/** Corps de POST /api/products/{id}/discount (produit ou formule). */
+data class SetDiscountBody(val priceCents: Int, val durationHours: Int)
 
 /** Composition d'une formule : le nom est fourni par GET /products et /formules. */
 data class FormuleItem(

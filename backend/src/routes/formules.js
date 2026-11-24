@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { db, toProduct, nowIso } from '../db.js';
+import { db, toProduct, nowIso, pruneDiscount } from '../db.js';
 import { requireAuth, requireSupplier } from '../auth.js';
 import { getIO } from '../sockets.js';
 
@@ -202,6 +202,7 @@ router.patch('/:id', requireAuth, requireSupplier, (req, res) => {
       db.prepare('UPDATE products SET cost_cents = ? WHERE id = ?')
         .run(costOf(fields.items), existing.id);
     }
+    if (fields.priceCents != null) pruneDiscount(existing.id, fields.priceCents);
   })();
 
   const formule = toProduct(findFormule(existing.id));
