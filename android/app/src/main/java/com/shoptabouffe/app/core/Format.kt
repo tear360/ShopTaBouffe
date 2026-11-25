@@ -36,30 +36,20 @@ fun String.eurosToCents(): Int? {
 /** "2026-11-15T14:32:07.000Z" → "15/11 14:32" (best effort, pas de java.time pour minSdk 24). */
 fun String?.toShortDateTime(): String {
     if (this.isNullOrBlank()) return "—"
-    return try {
-        val isoInput = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.FRANCE)
-        val isoOutput = SimpleDateFormat("dd/MM HH:mm", Locale.FRANCE)
-        isoOutput.format(isoInput.parse(this.substringBefore(".").take(19)) ?: return "—")
-    } catch (_: Exception) {
-        take(16).replace('T', ' ')
-    }
+    val millis = isoToEpochMillis() ?: return take(16).replace('T', ' ')
+    return SimpleDateFormat("dd/MM HH:mm", Locale.FRANCE).format(Date(millis))
 }
 
 /** Variante avec nom de mois. */
 fun String?.toDayMonth(): String {
     if (this.isNullOrBlank()) return "—"
-    return try {
-        val isoInput = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.FRANCE)
-        val isoDay = SimpleDateFormat("dd MMM", Locale.FRANCE)
-        isoDay.format(isoInput.parse(this.substringBefore(".").take(19)) ?: return "—")
-    } catch (_: Exception) {
-        take(10)
-    }
+    val millis = isoToEpochMillis() ?: return take(10)
+    return SimpleDateFormat("dd MMM", Locale.FRANCE).format(Date(millis))
 }
 
-/** "2026-11-26 14:30" (heure locale) → ISO UTC "2026-11-26T13:30:00Z". */
+/** "2026-11-26 14:30" (ou avec "T") → ISO UTC "2026-11-26T13:30:00Z". */
 fun String.localDateTimeToIso(): String? {
-    val text = trim()
+    val text = trim().replace('T', ' ')
     if (!text.matches(Regex("^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}$"))) return null
     val parser = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.FRANCE).apply { isLenient = false }
     val date = try {
@@ -73,11 +63,9 @@ fun String.localDateTimeToIso(): String? {
     return formatter.format(date)
 }
 
-/** ISO 8601 (fraction de seconde tolérée) → millisecondes depuis l'époque. */
-fun String?.isoToEpochMillis(): Long? {
-    if (this.isNullOrBlank()) return null
-    val text = substringBefore(".").take(19)
-    val parser = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
+/** Parse `AAAA-MM-JJTHH:mm:ss` (sans fuseau, donc UTC) en millisecondes. */
+private fun parseUtcIso(text: String): Long? {
+    val parser = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US).apply {
         timeZone = TimeZone.getTimeZone("UTC")
         isLenient = false
     }
@@ -86,6 +74,32 @@ fun String?.isoToEpochMillis(): Long? {
     } catch (_: Exception) {
         null
     }
+}
+
+/**
+ * ISO 8601 → millisecondes depuis l'époque.
+ * Accepte `...Z`, les fractions de seconde et les offsets `±HH:mm`.
+ * Le `Z` doit être retiré avant le parse : le motif n'inclut pas de fuseau,
+ * sinon `localDateTimeToIso()` produisait une date toujours « invalide ».
+ */
+fun String?.isoToEpochMillis(): Long? {
+    if (this.isNullOrBlank()) return null
+    var text = trim().replace(' ', 'T')
+    val dot = text.indexOf('.')
+    if (dot >= 0) text = text.substring(0, dot)
+    if (text.endsWith("Z", ignoreCase = true)) {
+        text = text.dropLast(1)
+    } else if (text.length >= 6) {
+        val offset = text.takeLast(6)
+        if (offset[0] == '+' || offset[0] == '-') {
+            val base = parseUtcIso(text.dropLast(6)) ?: return null
+            val hours = offset.substring(1, 3).toIntOrNull() ?: return null
+            val minutes = offset.substring(4, 6).toIntOrNull() ?: return null
+            val delta = (hours * 60 + minutes) * 60_000L
+            return if (offset[0] == '+') base - delta else base + delta
+        }
+    }
+    return parseUtcIso(text)
 }
 
 /** ISO UTC → heure locale "dd/MM HH:mm" (repli sur la conversion simple). */
