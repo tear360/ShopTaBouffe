@@ -270,6 +270,32 @@ export function nowIso() {
   return new Date().toISOString();
 }
 
+const SHOP_CLOSED_KEY = 'shop_closed_until';
+
+/**
+ * Fermeture temporaire de la boutique. La date d'expiration est conservée dans
+ * `settings` : une date dépassée rouvre la boutique automatiquement, sans tâche
+ * planifiée ni modification de la base.
+ */
+export function shopStatus() {
+  const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(SHOP_CLOSED_KEY);
+  const ts = row ? Date.parse(row.value) : NaN;
+  const reopensAt = Number.isFinite(ts) && ts > Date.now() ? row.value : null;
+  return { closed: !!reopensAt, reopensAt, now: nowIso() };
+}
+
+/** `null` réouvre immédiatement ; sinon ISO dans le futur. */
+export function setShopClosedUntil(value) {
+  if (value) {
+    db.prepare(
+      'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'
+    ).run(SHOP_CLOSED_KEY, value);
+  } else {
+    db.prepare('DELETE FROM settings WHERE key = ?').run(SHOP_CLOSED_KEY);
+  }
+  return shopStatus();
+}
+
 /** Ligne users → objet User (camelCase, dates ISO). */
 export function toUser(row) {
   if (!row) return null;

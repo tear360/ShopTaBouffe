@@ -16,6 +16,7 @@ import formuleRoutes from './routes/formules.js';
 import categoryRoutes from './routes/categories.js';
 import financeRoutes from './routes/finances.js';
 import orderRoutes from './routes/orders.js';
+import shopRoutes from './routes/shop.js';
 import conversationRoutes from './routes/conversations.js';
 import uploadRoutes, { UPLOAD_DIR } from './routes/uploads.js';
 import { startCleanup } from './cleanup.js';
@@ -60,6 +61,7 @@ app.use('/api/formules', formuleRoutes);
 app.use('/api/categories', categoryRoutes);
 app.use('/api/finances', financeRoutes);
 app.use('/api/orders', orderRoutes);
+app.use('/api/shop', shopRoutes);
 app.use('/api/conversations', conversationRoutes);
 app.use('/api/uploads', uploadRoutes);
 

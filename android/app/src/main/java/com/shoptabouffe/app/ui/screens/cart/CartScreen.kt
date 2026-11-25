@@ -56,10 +56,16 @@ import com.shoptabouffe.app.ui.components.EmptyState
 import com.shoptabouffe.app.ui.components.PrimaryButton
 import com.shoptabouffe.app.ui.components.ProductImage
 import com.shoptabouffe.app.ui.components.QuantitySelector
+import com.shoptabouffe.app.ui.components.ShopClosedGate
 import kotlinx.coroutines.launch
 
 @Composable
 fun CartScreen(onOrderCreated: (Long) -> Unit, initialPhone: String = "") {
+    ShopClosedGate { CartContent(onOrderCreated, initialPhone) }
+}
+
+@Composable
+private fun CartContent(onOrderCreated: (Long) -> Unit, initialPhone: String = "") {
     val lines by Cart.lines.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()

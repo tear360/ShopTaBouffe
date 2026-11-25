@@ -47,11 +47,21 @@ import com.shoptabouffe.app.core.models.Message
 import com.shoptabouffe.app.core.toShortDateTime
 import com.shoptabouffe.app.ui.components.Avatar
 import com.shoptabouffe.app.ui.components.ShopTaBouffeTopBar
+import com.shoptabouffe.app.ui.components.ShopClosedGate
 import com.shoptabouffe.app.ui.components.ErrorState
 import com.shoptabouffe.app.ui.components.LoadingBox
 
 @Composable
 fun ChatScreen(
+    conversationId: Long,
+    isSupplier: Boolean,
+    onBack: () -> Unit,
+) {
+    ShopClosedGate { ChatContent(conversationId, isSupplier, onBack) }
+}
+
+@Composable
+private fun ChatContent(
     conversationId: Long,
     isSupplier: Boolean,
     onBack: () -> Unit,

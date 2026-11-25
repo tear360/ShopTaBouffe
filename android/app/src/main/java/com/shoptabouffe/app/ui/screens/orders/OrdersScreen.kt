@@ -40,6 +40,7 @@ import com.shoptabouffe.app.ui.components.EmptyState
 import com.shoptabouffe.app.ui.components.ErrorState
 import com.shoptabouffe.app.ui.components.LoadingBox
 import com.shoptabouffe.app.ui.components.OrdersIcon
+import com.shoptabouffe.app.ui.components.ShopClosedGate
 import com.shoptabouffe.app.ui.components.StatusChip
 
 private val FILTERS = listOf(
@@ -51,6 +52,11 @@ private val FILTERS = listOf(
 
 @Composable
 fun OrdersScreen(onOpenOrder: (Long) -> Unit) {
+    ShopClosedGate { OrdersContent(onOpenOrder) }
+}
+
+@Composable
+private fun OrdersContent(onOpenOrder: (Long) -> Unit) {
     val vm: OrdersViewModel = viewModel()
     val state by vm.state.collectAsStateWithLifecycle()
 

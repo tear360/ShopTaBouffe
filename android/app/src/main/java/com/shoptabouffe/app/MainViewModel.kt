@@ -27,6 +27,7 @@ import com.shoptabouffe.app.core.models.TwoFactorVerifyBody
 import com.shoptabouffe.app.core.Cart
 import com.shoptabouffe.app.core.Config
 import com.shoptabouffe.app.core.Session
+import com.shoptabouffe.app.core.ShopState
 import com.shoptabouffe.app.core.SocketManager
 import com.shoptabouffe.app.core.Updater
 import com.shoptabouffe.app.core.models.CredentialsBody
@@ -125,6 +126,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     init {
         resolveSession()
         checkForUpdate()
+        ShopState.refresh()
     }
 
     /* ------------------------------------------------------------ session */

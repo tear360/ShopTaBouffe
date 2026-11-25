@@ -8,6 +8,7 @@ import com.shoptabouffe.app.core.models.ForgotPasswordBody
 import com.shoptabouffe.app.core.models.AuthResponse
 import com.shoptabouffe.app.core.models.CategoriesResponse
 import com.shoptabouffe.app.core.models.Category
+import com.shoptabouffe.app.core.models.CloseShopBody
 import com.shoptabouffe.app.core.models.CategoryBody
 import com.shoptabouffe.app.core.models.CodeBody
 import com.shoptabouffe.app.core.models.ConversationsResponse
@@ -41,6 +42,7 @@ import com.shoptabouffe.app.core.models.RegisterBody
 import com.shoptabouffe.app.core.models.ResendEmailResponse
 import com.shoptabouffe.app.core.models.SalesResponse
 import com.shoptabouffe.app.core.models.SetDiscountBody
+import com.shoptabouffe.app.core.models.ShopStatus
 import com.shoptabouffe.app.core.models.StatusBody
 import com.shoptabouffe.app.core.models.TwoFactorCodeBody
 import com.shoptabouffe.app.core.models.TwoFactorDisableBody
@@ -117,6 +119,17 @@ interface ShopTaBouffeApi {
 
     @POST("admin/logout-role")
     suspend fun exitSupplierRole(): User
+
+    // --- fermeture temporaire de la boutique -------------------------------
+    /** Statut public : utilisé au démarrage et pour rafraîchir le compte à rebours. */
+    @GET("shop/status")
+    suspend fun shopStatus(): ShopStatus
+
+    @POST("shop/close")
+    suspend fun closeShop(@Body body: CloseShopBody): ShopStatus
+
+    @POST("shop/open")
+    suspend fun openShop(): ShopStatus
 
     // --- produits ---------------------------------------------------------
     @GET("products")

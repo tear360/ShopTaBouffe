@@ -88,16 +88,20 @@ import com.shoptabouffe.app.core.statusLabel
 import com.shoptabouffe.app.core.toPrice
 import com.shoptabouffe.app.core.toPriceInput
 import com.shoptabouffe.app.core.toShortDateTime
+import com.shoptabouffe.app.core.toLocalDateTimeLabel
 import com.shoptabouffe.app.core.eurosToCents
 import com.shoptabouffe.app.ui.components.Avatar
+import com.shoptabouffe.app.ui.components.CardSurface
 import com.shoptabouffe.app.ui.components.DiscountPriceColor
 import com.shoptabouffe.app.ui.components.DiscountedPriceText
 import com.shoptabouffe.app.ui.components.EmptyState
 import com.shoptabouffe.app.ui.components.ErrorState
 import com.shoptabouffe.app.ui.components.LoadingBox
+import com.shoptabouffe.app.ui.components.PrimaryButton
 import com.shoptabouffe.app.ui.components.ProductImage
 import com.shoptabouffe.app.ui.components.StatusChip
 import com.shoptabouffe.app.ui.components.statusColor
+import com.shoptabouffe.app.ui.theme.Green
 
 private val ORDER_FILTERS = listOf(
     "all" to "Toutes",
@@ -159,13 +163,19 @@ fun AdminScreen(onOpenChat: (Long) -> Unit) {
                             }
                         },
                     )
+                    Tab(
+                        selected = state.tab == 3,
+                        onClick = { vm.setTab(3) },
+                        text = { Text("Boutique") },
+                    )
                 }
             }
 
             when (state.tab) {
                 0 -> OrdersTab(state = state, vm = vm, onChat = onOpenChat)
                 1 -> ProductsTab(state = state, vm = vm)
-                else -> ConversationsTab(state = state, onOpen = onOpenChat)
+                2 -> ConversationsTab(state = state, onOpen = onOpenChat)
+                else -> ShopTab(state = state, vm = vm)
             }
         }
 
@@ -459,6 +469,76 @@ private fun AdminOrderCard(
                 )
             }
         }
+    }
+}
+
+/* ============================================================= boutique === */
+
+/** Fermeture temporaire : statut, date de réouverture et actions fournisseur. */
+@Composable
+private fun ShopTab(state: AdminState, vm: AdminViewModel) {
+    val status = state.shopStatus
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        CardSurface {
+            Column(
+                modifier = Modifier.padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Text("État de la boutique", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    text = if (status.closed) "Fermée" else "Ouverte",
+                    style = MaterialTheme.typography.titleLarge,
+                    color = if (status.closed) MaterialTheme.colorScheme.error else Green,
+                )
+                if (status.closed) {
+                    Text(
+                        text = "Réouverture prévue : ${status.reopensAt.toLocalDateTimeLabel()}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Text(
+                    text = "Dernière synchronisation : ${status.now.toLocalDateTimeLabel()}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+
+        OutlinedTextField(
+            value = state.shopReopenAt,
+            onValueChange = vm::setShopReopenAt,
+            label = { Text("Réouverture (AAAA-MM-JJ HH:mm)") },
+            placeholder = { Text("2026-11-26 14:30") },
+            supportingText = {
+                Text(state.shopError ?: "Heure locale. La date doit être dans le futur.")
+            },
+            isError = state.shopError != null,
+            singleLine = true,
+            shape = RoundedCornerShape(16.dp),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
+            modifier = Modifier.fillMaxWidth(),
+        )
+
+        PrimaryButton(
+            text = "Fermer temporairement",
+            onClick = vm::closeShop,
+            enabled = state.shopReopenAt.isNotBlank() && !state.shopBusy,
+            loading = state.shopBusy,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        OutlinedButton(
+            onClick = vm::openShop,
+            enabled = status.closed && !state.shopBusy,
+            shape = RoundedCornerShape(18.dp),
+            modifier = Modifier.fillMaxWidth(),
+        ) { Text("Rouvrir maintenant") }
     }
 }
 

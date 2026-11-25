@@ -36,8 +36,8 @@ android {
         applicationId = "com.shoptabouffe.app"
         minSdk = 24
         targetSdk = 35
-        versionCode = 17
-        versionName = "1.0.16"
+        versionCode = 18
+        versionName = "1.0.17"
 
         buildConfigField("String", "BASE_URL", "\"$apiUrl\"")
         vectorDrawables.useSupportLibrary = true

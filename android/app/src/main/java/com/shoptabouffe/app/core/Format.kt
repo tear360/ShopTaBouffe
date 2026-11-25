@@ -3,6 +3,7 @@ package com.shoptabouffe.app.core
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.TimeZone
 
 /** 950 → "9,50 €" */
 fun Int.toPrice(): String {
@@ -54,6 +55,43 @@ fun String?.toDayMonth(): String {
     } catch (_: Exception) {
         take(10)
     }
+}
+
+/** "2026-11-26 14:30" (heure locale) → ISO UTC "2026-11-26T13:30:00Z". */
+fun String.localDateTimeToIso(): String? {
+    val text = trim()
+    if (!text.matches(Regex("^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}$"))) return null
+    val parser = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.FRANCE).apply { isLenient = false }
+    val date = try {
+        parser.parse(text)
+    } catch (_: Exception) {
+        null
+    } ?: return null
+    val formatter = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
+        timeZone = TimeZone.getTimeZone("UTC")
+    }
+    return formatter.format(date)
+}
+
+/** ISO 8601 (fraction de seconde tolérée) → millisecondes depuis l'époque. */
+fun String?.isoToEpochMillis(): Long? {
+    if (this.isNullOrBlank()) return null
+    val text = substringBefore(".").take(19)
+    val parser = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
+        timeZone = TimeZone.getTimeZone("UTC")
+        isLenient = false
+    }
+    return try {
+        parser.parse(text)?.time
+    } catch (_: Exception) {
+        null
+    }
+}
+
+/** ISO UTC → heure locale "dd/MM HH:mm" (repli sur la conversion simple). */
+fun String?.toLocalDateTimeLabel(): String {
+    val millis = isoToEpochMillis() ?: return toShortDateTime()
+    return SimpleDateFormat("dd/MM HH:mm", Locale.FRANCE).format(Date(millis))
 }
 
 /** Date courante formatée pour l'UI (debug / journal). */

@@ -28,6 +28,7 @@ object SocketManager {
         "order:deleted",
         "conversation:deleted",
         "product:changed",
+        "shop:changed",
     )
 
     private val handlers = CopyOnWriteArrayList<Pair<String, (JSONObject?) -> Unit>>()

@@ -52,6 +52,7 @@ import com.shoptabouffe.app.ui.components.ErrorState
 import com.shoptabouffe.app.ui.components.LoadingBox
 import com.shoptabouffe.app.ui.components.PrimaryButton
 import com.shoptabouffe.app.ui.components.SectionHeader
+import com.shoptabouffe.app.ui.components.ShopClosedGate
 import com.shoptabouffe.app.ui.components.StatusChip
 import com.shoptabouffe.app.ui.theme.Green
 import com.shoptabouffe.app.ui.theme.Red
@@ -66,6 +67,16 @@ private val STEPS = listOf(
 
 @Composable
 fun OrderDetailScreen(
+    orderId: Long,
+    canChat: Boolean = true,
+    onBack: () -> Unit,
+    onOpenChat: (Long) -> Unit,
+) {
+    ShopClosedGate { OrderDetailContent(orderId, canChat, onBack, onOpenChat) }
+}
+
+@Composable
+private fun OrderDetailContent(
     orderId: Long,
     canChat: Boolean = true,
     onBack: () -> Unit,

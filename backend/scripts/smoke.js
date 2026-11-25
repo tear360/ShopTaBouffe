@@ -513,8 +513,11 @@ async function runAll() {
   await step('OAuth sans clés : redirect not_configured (pas de 500)', async () => {
     const start = await api('GET', '/api/auth/start?provider=github', { redirect: 'manual' });
     assert(start.status === 302, `start → ${start.status}`);
-    const expected = `${base}/api/auth/failed?reason=not_configured`;
-    assert(start.location === expected, `Location = ${start.location} (attendu ${expected})`);
+    // L'hôte dépend de PUBLIC_URL (serveur existant) ou de base (serveur lancé par le smoke).
+    assert(
+      start.location && start.location.endsWith('/api/auth/failed?reason=not_configured'),
+      `Location = ${start.location}`
+    );
     const failed = await api('GET', '/api/auth/failed?reason=not_configured', { redirect: 'manual' });
     assert(failed.status === 302, `failed → ${failed.status}`);
     assert(failed.location === 'shoptabouffe://auth?error=not_configured', `deep link = ${failed.location}`);
@@ -523,6 +526,60 @@ async function runAll() {
     assert(cb.location && cb.location.startsWith('shoptabouffe://auth?error=state_mismatch'), `callback Location = ${cb.location}`);
     const unknown = await api('GET', '/api/auth/start?provider=nope', { redirect: 'manual' });
     assert(unknown.status === 404, `provider inconnu → ${unknown.status}`);
+  });
+
+  await step('Fermeture temporaire boutique : droits, blocage commandes, réouverture', async () => {
+    const reopen = () => api('POST', '/api/shop/open', { token: state.tokenA });
+    const orderBody = () => ({
+      items: [{ productId: state.products[0].id, qty: 1 }],
+      address: '12 rue des Lilas, Paris',
+      phone: '0612345678',
+    });
+    try {
+      await reopen();
+      const initial = await api('GET', '/api/shop/status');
+      assert(initial.status === 200 && initial.json.closed === false, `statut initial ${initial.status}`);
+
+      const anon = await api('POST', '/api/shop/close', {
+        body: { reopensAt: new Date(Date.now() + 3600_000).toISOString() },
+      });
+      assert(anon.status === 401, `close sans token = ${anon.status}`);
+      const forbidden = await api('POST', '/api/shop/close', {
+        token: state.tokenB,
+        body: { reopensAt: new Date(Date.now() + 3600_000).toISOString() },
+      });
+      assert(forbidden.status === 403, `close client = ${forbidden.status}`);
+      const past = await api('POST', '/api/shop/close', {
+        token: state.tokenA,
+        body: { reopensAt: new Date(Date.now() - 60_000).toISOString() },
+      });
+      assert(past.status === 400, `date passée = ${past.status}`);
+
+      const until = new Date(Date.now() + 3600_000).toISOString();
+      const closed = await api('POST', '/api/shop/close', { token: state.tokenA, body: { reopensAt: until } });
+      assert(closed.status === 200 && closed.json.closed === true, `close = ${closed.status} ${closed.text}`);
+      assert(closed.json.reopensAt === until, 'reopensAt incorrect');
+
+      const blocked = await api('POST', '/api/orders', { token: state.tokenA, body: orderBody() });
+      assert(blocked.status === 403, `commande pendant fermeture = ${blocked.status}`);
+      assert(blocked.json.reopensAt === until, 'reopensAt absent du 403');
+
+      const open = await api('POST', '/api/shop/open', { token: state.tokenA });
+      assert(open.status === 200 && open.json.closed === false && open.json.reopensAt === null, `open = ${open.status}`);
+      const allowed = await api('POST', '/api/orders', { token: state.tokenA, body: orderBody() });
+      assert(allowed.status === 201, `commande après réouverture = ${allowed.status}`);
+      db.prepare('DELETE FROM order_items WHERE order_id = ?').run(allowed.json.id);
+      db.prepare('DELETE FROM orders WHERE id = ?').run(allowed.json.id);
+
+      // Date dépassée : la boutique se rouvre toute seule, sans appel supplémentaire.
+      db.prepare(
+        "INSERT INTO settings (key, value) VALUES ('shop_closed_until', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+      ).run(new Date(Date.now() - 1000).toISOString());
+      const expired = await api('GET', '/api/shop/status');
+      assert(expired.json.closed === false && expired.json.reopensAt === null, 'expiration automatique KO');
+    } finally {
+      await reopen();
+    }
   });
 
   await step('Purge 2 h : commande terminée supprimée, chat si plus rien en cours', async () => {

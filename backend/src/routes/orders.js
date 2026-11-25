@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { db, nowIso, effectivePriceCents } from '../db.js';
+import { db, nowIso, effectivePriceCents, shopStatus } from '../db.js';
 import { requireAuth, requireSupplier } from '../auth.js';
 import { getIO } from '../sockets.js';
 
@@ -78,6 +78,15 @@ function recordSale(order) {
 
 /** POST /api/orders */
 router.post('/', requireAuth, (req, res) => {
+  // Fermeture temporaire : le serveur reste autoritatif même si un client ancien
+  // tente de commander depuis une page déjà chargée avant la fermeture.
+  const shop = shopStatus();
+  if (shop.closed) {
+    return res.status(403).json({
+      error: `Boutique fermée ; réouverture dans ${Math.ceil((Date.parse(shop.reopensAt) - Date.now()) / 60000)} min`,
+      reopensAt: shop.reopensAt,
+    });
+  }
   const body = req.body && typeof req.body === 'object' ? req.body : {};
   const errors = [];
   const items = body.items;

@@ -6,7 +6,10 @@ import androidx.lifecycle.viewModelScope
 import com.shoptabouffe.app.core.Api
 import com.shoptabouffe.app.core.ApiResult
 import com.shoptabouffe.app.core.Cart
+import com.shoptabouffe.app.core.ShopState
 import com.shoptabouffe.app.core.SocketManager
+import com.shoptabouffe.app.core.isoToEpochMillis
+import com.shoptabouffe.app.core.localDateTimeToIso
 import com.shoptabouffe.app.core.models.Conversation
 import com.shoptabouffe.app.core.models.Category
 import com.shoptabouffe.app.core.models.CategoryBody
@@ -16,14 +19,17 @@ import com.shoptabouffe.app.core.models.CreateProductBody
 import com.shoptabouffe.app.core.models.Order
 import com.shoptabouffe.app.core.models.Product
 import com.shoptabouffe.app.core.models.SetDiscountBody
+import com.shoptabouffe.app.core.models.ShopStatus
 import com.shoptabouffe.app.core.models.StatusBody
 import com.shoptabouffe.app.core.eurosToCents
+import com.shoptabouffe.app.core.toLocalDateTimeLabel
 import com.shoptabouffe.app.core.statusLabel
 import com.shoptabouffe.app.core.toPrice
 import com.shoptabouffe.app.core.toPriceInput
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -52,6 +58,11 @@ data class AdminState(
     val discountPrice: String = "",
     val discountHours: String = "24",
     val discountError: String? = null,
+    /** Statut global de la boutique, répliqué ici pour l'onglet « Boutique ». */
+    val shopStatus: ShopStatus = ShopStatus(),
+    val shopReopenAt: String = "",
+    val shopBusy: Boolean = false,
+    val shopError: String? = null,
 ) {
     val pendingCount: Int get() = orders.count { it.status == "pending" }
 
@@ -88,6 +99,10 @@ class AdminViewModel(app: Application) : AndroidViewModel(app) {
             SocketManager.on("conversation:deleted") { loadConversations() },
             SocketManager.on("categories:changed") { loadCategories() },
         )
+        viewModelScope.launch {
+            ShopState.status.collect { status -> _state.update { it.copy(shopStatus = status) } }
+        }
+        ShopState.refresh()
     }
 
     fun loadAll() {
@@ -146,6 +161,67 @@ class AdminViewModel(app: Application) : AndroidViewModel(app) {
     fun setTab(value: Int) = _state.update { it.copy(tab = value) }
 
     fun setStatusFilter(value: String) = _state.update { it.copy(statusFilter = value) }
+
+    /* ----------------------------------------------------------- boutique */
+
+    fun setShopReopenAt(value: String) = _state.update {
+        it.copy(shopReopenAt = value, shopError = null)
+    }
+
+    /** POST /shop/close — saisie locale « AAAA-MM-JJ HH:mm », convertie en ISO UTC. */
+    fun closeShop() {
+        val iso = _state.value.shopReopenAt.localDateTimeToIso()
+        val instant = iso.isoToEpochMillis()
+        val error = when {
+            iso == null -> "Saisissez une date/heure au format AAAA-MM-JJ HH:mm."
+            instant == null -> "Cette date/heure est invalide."
+            instant <= System.currentTimeMillis() -> "La réouverture doit être dans le futur."
+            else -> null
+        }
+        if (error != null) {
+            _state.update { it.copy(shopError = error) }
+            return
+        }
+        val reopensAt = iso ?: return
+        _state.update { it.copy(shopBusy = true, shopError = null) }
+        viewModelScope.launch {
+            when (val result = ShopState.close(reopensAt)) {
+                is ApiResult.Success -> {
+                    _state.update {
+                        it.copy(
+                            shopBusy = false,
+                            shopError = null,
+                            notice = "Boutique fermée jusqu'au ${reopensAt.toLocalDateTimeLabel()}.",
+                        )
+                    }
+                    ShopState.refresh()
+                }
+
+                is ApiResult.Failure -> _state.update {
+                    it.copy(shopBusy = false, shopError = result.message, notice = result.message)
+                }
+            }
+        }
+    }
+
+    /** POST /shop/open — réouverture immédiate. */
+    fun openShop() {
+        _state.update { it.copy(shopBusy = true, shopError = null) }
+        viewModelScope.launch {
+            when (val result = ShopState.open()) {
+                is ApiResult.Success -> {
+                    _state.update {
+                        it.copy(shopBusy = false, shopError = null, notice = "Boutique rouverte.")
+                    }
+                    ShopState.refresh()
+                }
+
+                is ApiResult.Failure -> _state.update {
+                    it.copy(shopBusy = false, shopError = result.message, notice = result.message)
+                }
+            }
+        }
+    }
 
     /* --------------------------------------------------------- commandes */
 

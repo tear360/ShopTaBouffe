@@ -64,12 +64,19 @@ import com.shoptabouffe.app.ui.components.LoadingBox
 import com.shoptabouffe.app.ui.components.PrimaryButton
 import com.shoptabouffe.app.ui.components.ProductImage
 import com.shoptabouffe.app.ui.components.QuantitySelector
+import com.shoptabouffe.app.ui.components.ShopClosedGate
 import com.shoptabouffe.app.ui.components.statusColor
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun GalleryScreen(
+fun GalleryScreen(isSupplier: Boolean) {
+    ShopClosedGate { GalleryContent(isSupplier) }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun GalleryContent(
     isSupplier: Boolean,
 ) {
     val vm: GalleryViewModel = viewModel()

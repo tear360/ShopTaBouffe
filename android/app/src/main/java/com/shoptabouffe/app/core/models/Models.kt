@@ -330,3 +330,15 @@ data class RegisterBody(val name: String, val username: String, val password: St
 data class UploadResponse(val url: String? = null)
 
 data class MessageBody(val body: String)
+
+/* -------------------------------------------------------- boutique fermée */
+
+/** GET /api/shop/status (public) et réponse de /shop/close | /shop/open. */
+data class ShopStatus(
+    val closed: Boolean = false,
+    @SerializedName("reopensAt") val reopensAt: String? = null,
+    val now: String? = null,
+)
+
+/** POST /api/shop/close — instant de réouverture au format ISO 8601. */
+data class CloseShopBody(val reopensAt: String)

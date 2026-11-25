@@ -89,6 +89,8 @@ const state = {
   param: null,
   cart: loadCart(),
   // boutique
+  shopStatus: { closed: false, reopensAt: null, now: null },
+  shopReopenValue: '',
   products: [], search: '', category: '',
   categories: [],
   // commandes
@@ -280,16 +282,132 @@ function loginErrorFromUrl() {
   return map[err] || 'Erreur pendant la connexion.';
 }
 
+/* ---------------- Statut de la boutique ---------------- */
+
+let shopStatusRefreshing = false;
+let shopCountdownTimer = null;
+
+function normalizeShopStatus(data) {
+  const reopensAt = data && data.reopensAt ? data.reopensAt : null;
+  const ts = reopensAt ? new Date(reopensAt).getTime() : NaN;
+  const expired = Number.isFinite(ts) && ts <= Date.now();
+  return {
+    closed: !!(data && data.closed) && !expired,
+    reopensAt,
+    now: (data && data.now) || null,
+  };
+}
+
+function setShopStatus(data) {
+  state.shopStatus = normalizeShopStatus(data);
+}
+
+async function loadShopStatus() {
+  try {
+    setShopStatus(await api('/shop/status'));
+  } catch { /* statut non bloquant */ }
+}
+
+function shopStatusExpired() {
+  if (!state.shopStatus.reopensAt) return false;
+  const ts = new Date(state.shopStatus.reopensAt).getTime();
+  return Number.isFinite(ts) && ts <= Date.now();
+}
+
+function refreshShopStatusOnce() {
+  if (shopStatusRefreshing) return Promise.resolve();
+  shopStatusRefreshing = true;
+  return loadShopStatus().finally(() => { shopStatusRefreshing = false; });
+}
+
+function formatShopCountdown(ms) {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const days = Math.floor(total / 86400);
+  const hours = Math.floor((total % 86400) / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const seconds = total % 60;
+  if (days) return `${days} j ${hours} h ${minutes} min`;
+  if (hours) return `${hours} h ${minutes} min`;
+  if (minutes) return `${minutes} min ${seconds} s`;
+  return `${seconds} s`;
+}
+
+function shopBlocksView() {
+  if (!state.shopStatus.closed || shopStatusExpired()) return false;
+  if (state.view === 'profile') return false;
+  return !(isSupplier() && (state.view === 'admin' || state.view === 'finances'));
+}
+
+function shopInputValue(date) {
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function shopReopenDefault() {
+  return shopInputValue(new Date(Date.now() + 24 * 60 * 60 * 1000));
+}
+
+function viewShopClosed() {
+  const reopensAt = state.shopStatus.reopensAt;
+  const ts = reopensAt ? new Date(reopensAt).getTime() : NaN;
+  const countdown = Number.isFinite(ts) ? formatShopCountdown(ts - Date.now()) : 'bientôt';
+  return `
+  <div class="shop-closed">
+    <div class="shop-closed-logo">${ICONS.store}</div>
+    <h1>Boutique fermée</h1>
+    <p class="shop-closed-message">Réouverture dans</p>
+    <div class="shop-closed-countdown" id="shop-countdown" role="status" aria-live="polite">${h(countdown)}</div>
+    ${reopensAt ? `<p class="shop-closed-date">Réouverture prévue le ${h(fmtDate(reopensAt))}</p>` : ''}
+    <div class="shop-closed-links">
+      <button class="btn btn-ghost btn-sm" type="button" data-action="go" data-view="profile">Mon profil</button>
+      ${isSupplier() ? `<button class="btn btn-ghost btn-sm" type="button" data-action="go" data-view="admin">Administration</button>` : ''}
+    </div>
+  </div>`;
+}
+
+function stopShopCountdown() {
+  if (shopCountdownTimer) {
+    clearInterval(shopCountdownTimer);
+    shopCountdownTimer = null;
+  }
+}
+
+function startShopCountdown() {
+  stopShopCountdown();
+  const tick = () => {
+    const el = $('#shop-countdown');
+    if (!el) { stopShopCountdown(); return; }
+    if (shopStatusExpired()) { render(); return; }
+    const ts = state.shopStatus.reopensAt ? new Date(state.shopStatus.reopensAt).getTime() : NaN;
+    el.textContent = Number.isFinite(ts) ? formatShopCountdown(ts - Date.now()) : 'bientôt';
+  };
+  tick();
+  shopCountdownTimer = setInterval(tick, 1000);
+}
+
 /* ---------------- Rendu : dispatcher ---------------- */
 
 function render() {
   const app = $('#app');
+  stopShopCountdown();
   const authScreen = state.loginMode === 'forgot' || state.loginMode === 'reset'
     || state.loginMode === 'twofa';
   if (!state.token || !state.user || authScreen) {
     app.innerHTML = viewLogin() + (state.upgradeModal ? viewUpgradeModal() : '');
     return;
   }
+
+  if (state.shopStatus.closed && shopStatusExpired()) {
+    state.shopStatus.closed = false;
+    refreshShopStatusOnce().then(render);
+  }
+
+  if (shopBlocksView()) {
+    app.innerHTML = viewShopClosed() + (state.upgradeModal ? viewUpgradeModal() : '');
+    startShopCountdown();
+    return;
+  }
+
   app.innerHTML = shell() + (state.upgradeModal ? viewUpgradeModal() : '');
   afterRender();
 }
@@ -1394,10 +1512,36 @@ function viewAdmin() {
       </div>`;
   }
   const pending = state.adminOrders.filter((o) => o.status === 'pending').length;
+  const shopClosed = !!state.shopStatus.closed && !shopStatusExpired();
+  const shopStatusText = shopClosed
+    ? (state.shopStatus.reopensAt
+      ? `Fermée jusqu'au ${h(fmtDate(state.shopStatus.reopensAt))}`
+      : 'Fermée (réouverture à annoncer)')
+    : 'Ouverte';
+  const shopCard = isSupplier() ? `
+  <div class="shop-admin-card">
+    <div class="shop-admin-head">
+      <h3>Boutique</h3>
+      <span class="pill ${shopClosed ? '' : 'on'}">${shopClosed ? 'Fermée' : 'Ouverte'}</span>
+    </div>
+    <p class="shop-admin-status">Statut actuel : ${shopStatusText}</p>
+    <div class="shop-admin-row">
+      <div>
+        <label for="shop-reopen">Date et heure de réouverture</label>
+        <input id="shop-reopen" type="datetime-local" data-field="shop-reopen"
+               value="${h(state.shopReopenValue || shopReopenDefault())}" />
+      </div>
+    </div>
+    <div class="shop-admin-actions">
+      <button class="btn btn-sm" type="button" data-action="shop-close">Fermer temporairement</button>
+      ${shopClosed ? `<button class="btn btn-ghost btn-sm" type="button" data-action="shop-open">Rouvrir maintenant</button>` : ''}
+    </div>
+  </div>` : '';
   return `
   <div class="view-title">Produits
     ${pending ? `<span class="status pending">${pending} nouvelle(s)</span>` : ''}
   </div>
+  ${shopCard}
   <div class="admin-tabs">
     ${ADMIN_TABS.map(([id, label, ic]) => `
       <button class="chip ${state.adminTab === id ? 'active' : ''}" data-action="atab" data-t="${id}">
@@ -2173,6 +2317,12 @@ function connectSocket() {
     }
   });
 
+  socket.on('shop:changed', (payload) => {
+    if (payload) setShopStatus(payload);
+    else loadShopStatus();
+    render();
+  });
+
   socket.on('product:changed', () => {
     if (state.view === 'gallery') {
       loadProducts().then(() => { refreshCartPrices(); render(); });
@@ -2353,6 +2503,32 @@ document.addEventListener('click', async (e) => {
       render();
     } else if (action === 'atab') {
       state.adminTab = el.dataset.t;
+      render();
+    } else if (action === 'shop-close' || action === 'shop-open') {
+      if (!isSupplier()) return;
+      el.disabled = true;
+      state.error = null;
+      let data;
+      if (action === 'shop-close') {
+        const input = $('[data-field="shop-reopen"]');
+        const value = String((input && input.value) || '').trim();
+        state.shopReopenValue = value;
+        const reopen = value ? new Date(value) : null;
+        if (!reopen || !Number.isFinite(reopen.getTime()) || reopen.getTime() <= Date.now()) {
+          state.error = value
+            ? 'La date de réouverture doit être dans le futur.'
+            : 'Choisissez une date et une heure de réouverture.';
+          toast(state.error, 'err');
+          render();
+          return;
+        }
+        data = await api('/shop/close', { method: 'POST', body: { reopensAt: reopen.toISOString() } });
+      } else {
+        data = await api('/shop/open', { method: 'POST' });
+      }
+      setShopStatus(data);
+      state.shopReopenValue = '';
+      toast(action === 'shop-close' ? 'Boutique fermée temporairement' : 'Boutique rouverte', 'ok');
       render();
     } else if (action === 'create-open') {
       openCreateModal();
@@ -2548,6 +2724,8 @@ document.addEventListener('change', async (e) => {
     if (e.target.checked && typeof Notification !== 'undefined' && Notification.permission === 'default') {
       Notification.requestPermission();
     }
+  } else if (e.target.dataset.field === 'shop-reopen') {
+    state.shopReopenValue = e.target.value;
   }
 });
 
@@ -3018,6 +3196,7 @@ async function bootAfterLogin() {
   }
 
   connectSocket();
+  await loadShopStatus();
   await loadCategories();
   if (isSupplier()) await loadAdminConversations();
   else await loadConversations();
@@ -3030,6 +3209,7 @@ async function init() {
   const linkedProvider = params.get('linked');
   const urlError = loginErrorFromUrl();
   if (urlError) state.loginError = urlError;
+  loadShopStatus();
 
   // Retour depuis le lien e-mail : /app?reset=<jeton> (ou /?reset=<jeton>).
   if (resetToken) {

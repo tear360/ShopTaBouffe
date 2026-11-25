@@ -9,10 +9,10 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const API_BASE: &str = "https://chorizo.dpdns.org/api";
-const APP_VERSION: &str = "1.0.16";
+const APP_VERSION: &str = "1.0.17";
 
 /* ------------------------------------------------------- palette (Theme.kt) */
 
@@ -64,6 +64,23 @@ impl User {
     fn can_chat(&self) -> bool {
         self.is_supplier() || self.provider.as_deref() != Some("demo")
     }
+}
+
+/// GET /api/shop/status — état d'ouverture de la boutique (endpoint public).
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(default)]
+struct ShopStatus {
+    closed: bool,
+    #[serde(rename = "reopensAt")]
+    reopens_at: Option<String>,
+    now: Option<String>,
+}
+
+/// POST /api/shop/close — le fournisseur choisit la date de réouverture.
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+struct CloseShopBody {
+    #[serde(rename = "reopensAt")]
+    reopens_at: String,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -351,6 +368,7 @@ enum Msg {
     UpgradeErr(String),
     RoleUpdated(User),
     Products(Vec<Product>),
+    ShopStatus(ShopStatus),
     Account(Account),
     PendingEmail(Option<String>),
     EmailVerified(Account),
@@ -407,6 +425,14 @@ struct ShopApp {
     up_password: String,
     notice: Option<String>,
     notice_at: Option<Instant>,
+
+    // Statut d'ouverture : refresh public périodique + actions du fournisseur.
+    shop_status: ShopStatus,
+    shop_reopen_input: String,
+    /// Réception du statut : sert de référence au compte à rebours (clock serveur).
+    status_received_at: Option<Instant>,
+    /// Dernière demande de statut (indépendante du polling des données loguées).
+    last_status_poll: Option<Instant>,
 
     // Compte : profil distant, identités liées et champs modifiables.
     account: Option<Account>,
@@ -569,6 +595,10 @@ impl Default for ShopApp {
             }
         });
 
+        // Statut public de la boutique : disponible avant même la connexion.
+        let tx_status = tx.clone();
+        thread::spawn(move || fetch_shop_status(tx_status, None));
+
         // Reprend la session en cours (anciens comptes invités inclus).
         if let Ok(token) = std::fs::read_to_string(session_file()) {
             let token = token.trim().to_string();
@@ -600,6 +630,10 @@ impl Default for ShopApp {
             up_password: String::new(),
             notice: None,
             notice_at: None,
+            shop_status: ShopStatus::default(),
+            shop_reopen_input: String::new(),
+            status_received_at: None,
+            last_status_poll: Some(Instant::now()),
             account: None,
             account_email: String::new(),
             account_phone: String::new(),
@@ -750,6 +784,68 @@ fn parse_ok<R: serde::de::DeserializeOwned>(
             let _ = tx.send(Msg::Error("Réponse du serveur invalide.".into()));
         }
     }
+}
+
+/// GET /api/shop/status — refresh silencieux (pas de notice en cas d'échec réseau).
+fn fetch_shop_status(tx: Sender<Msg>, token: Option<String>) {
+    thread::spawn(move || {
+        if let Ok(text) = http_call(
+            reqwest::Method::GET,
+            format!("{}/shop/status", API_BASE),
+            token,
+            None,
+            None,
+        ) {
+            parse_ok(&tx, text, |s: ShopStatus| {
+                let _ = tx.send(Msg::ShopStatus(s));
+            });
+        }
+    });
+}
+
+/// POST /api/shop/close — fermeture temporaire jusqu'à `reopens_at` (ISO UTC).
+fn close_shop(tx: Sender<Msg>, token: String, reopens_at: String) {
+    thread::spawn(move || {
+        let body = match serde_json::to_value(CloseShopBody { reopens_at }) {
+            Ok(v) => v,
+            Err(e) => {
+                let _ = tx.send(Msg::Error(e.to_string()));
+                return;
+            }
+        };
+        match http_call(
+            reqwest::Method::POST,
+            format!("{}/shop/close", API_BASE),
+            Some(token),
+            Some(body),
+            None,
+        ) {
+            Ok(text) => parse_ok(&tx, text, |s: ShopStatus| {
+                let _ = tx.send(Msg::ShopStatus(s));
+                let _ = tx.send(Msg::Notice("Boutique fermée temporairement.".into()));
+            }),
+            Err(e) => forward_err(&tx, e),
+        }
+    });
+}
+
+/// POST /api/shop/open — réouverture immédiate.
+fn open_shop(tx: Sender<Msg>, token: String) {
+    thread::spawn(move || {
+        match http_call(
+            reqwest::Method::POST,
+            format!("{}/shop/open", API_BASE),
+            Some(token),
+            None,
+            None,
+        ) {
+            Ok(text) => parse_ok(&tx, text, |s: ShopStatus| {
+                let _ = tx.send(Msg::ShopStatus(s));
+                let _ = tx.send(Msg::Notice("Boutique rouverte.".into()));
+            }),
+            Err(e) => forward_err(&tx, e),
+        }
+    });
 }
 
 fn fetch_products(tx: Sender<Msg>, token: Option<String>) {
@@ -2216,6 +2312,171 @@ fn short_time(iso: &Option<String>) -> String {
     }
 }
 
+/* ------------------------------------------------- dates / compte à rebours */
+
+/// Secondes Unix actuelles (UTC).
+fn unix_now() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+fn days_in_month(year: i64, month: i64) -> i64 {
+    match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 => {
+            let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+            if leap {
+                29
+            } else {
+                28
+            }
+        }
+        _ => 0,
+    }
+}
+
+/// Jours depuis 1970-01-01 (algorithme civil de Hinnant).
+fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
+    let y = year - if month <= 2 { 1 } else { 0 };
+    let era = if y >= 0 { y } else { y - 399 } / 400;
+    let yoe = y - era * 400;
+    let mp = month + if month > 2 { -3 } else { 9 };
+    let doy = (153 * mp + 2) / 5 + day - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146_097 + doe - 719_468
+}
+
+/// Parsing ISO simple, sans dépendance supplémentaire.
+/// Accepte `AAAA-MM-JJTHH:MM[:SS[.fff]]` (considéré UTC), `...Z` et
+/// `...+HH:MM` / `...-HH:MM`. Retourne un timestamp UTC en secondes.
+fn parse_iso_utc(input: &str) -> Option<i64> {
+    let s = input.trim();
+    let b = s.as_bytes();
+    if b.len() < 16 {
+        return None;
+    }
+    let digits = |from: usize, to: usize| -> Option<i64> {
+        if from >= to || to > b.len() {
+            return None;
+        }
+        s.get(from..to)?.parse::<i64>().ok()
+    };
+    if b[4] != b'-'
+        || b[7] != b'-'
+        || (b[10] != b'T' && b[10] != b' ')
+        || b[13] != b':'
+    {
+        return None;
+    }
+    let year = digits(0, 4)?;
+    let month = digits(5, 7)?;
+    let day = digits(8, 10)?;
+    let hour = digits(11, 13)?;
+    let minute = digits(14, 16)?;
+
+    let mut i = 16usize;
+    let mut second = 0i64;
+    if i < b.len() && b[i] == b':' {
+        second = digits(i + 1, i + 3)?;
+        i += 3;
+    }
+    if i < b.len() && b[i] == b'.' {
+        i += 1;
+        let start = i;
+        while i < b.len() && b[i].is_ascii_digit() {
+            i += 1;
+        }
+        if i == start {
+            return None;
+        }
+    }
+
+    let mut offset = 0i64;
+    if i == b.len() {
+        // Format naïf : traité comme UTC (l'UI l'indique explicitement).
+    } else if b[i] == b'Z' || b[i] == b'z' {
+        i += 1;
+    } else if b[i] == b'+' || b[i] == b'-' {
+        let sign = if b[i] == b'-' { -1 } else { 1 };
+        i += 1;
+        let oh = digits(i, i + 2)?;
+        i += 2;
+        let om = if i < b.len() && b[i] == b':' {
+            i += 1;
+            let m = digits(i, i + 2)?;
+            i += 2;
+            m
+        } else if i + 2 <= b.len() {
+            let m = digits(i, i + 2)?;
+            i += 2;
+            m
+        } else {
+            0
+        };
+        if oh > 23 || om > 59 {
+            return None;
+        }
+        offset = sign * (oh * 3600 + om * 60);
+    } else {
+        return None;
+    }
+    if i != b.len() {
+        return None;
+    }
+    if !(1..=12).contains(&month) || day < 1 || day > days_in_month(year, month) {
+        return None;
+    }
+    if hour > 23 || minute > 59 || second > 59 {
+        return None;
+    }
+    Some(days_from_civil(year, month, day) * 86_400 + hour * 3600 + minute * 60 + second - offset)
+}
+
+/// Compte à rebours lisible, calculé à chaque frame.
+/// `now` du serveur + temps écoulé depuis réception évite les désyncs d'horloge.
+fn shop_countdown(status: &ShopStatus, received_at: Option<Instant>) -> String {
+    let Some(iso) = status.reopens_at.as_deref() else {
+        return "date non communiquée".to_string();
+    };
+    let Some(target) = parse_iso_utc(iso) else {
+        return "réouverture prochaine".to_string();
+    };
+
+    let mut now = unix_now();
+    if let Some(server_now) = status.now.as_deref().and_then(parse_iso_utc) {
+        now = server_now;
+        if let Some(at) = received_at {
+            now += at.elapsed().as_secs() as i64;
+        }
+    }
+
+    let remaining = (target - now).max(0);
+    if remaining == 0 {
+        return "imminente".to_string();
+    }
+    let days = remaining / 86_400;
+    let hours = (remaining % 86_400) / 3600;
+    let minutes = (remaining % 3600) / 60;
+    let mut parts: Vec<String> = Vec::new();
+    if days > 0 {
+        parts.push(format!("{} j", days));
+    }
+    if hours > 0 {
+        parts.push(format!("{} h", hours));
+    }
+    if minutes > 0 {
+        parts.push(format!("{} min", minutes));
+    }
+    if parts.is_empty() {
+        "moins d'une min".to_string()
+    } else {
+        parts.join(" ")
+    }
+}
+
 fn status_role(r: &str) -> &'static str {
     match r {
         "supplier" => "Fournisseur",
@@ -2229,6 +2490,175 @@ impl ShopApp {
     fn set_notice(&mut self, msg: impl Into<String>) {
         self.notice = Some(msg.into());
         self.notice_at = Some(Instant::now());
+    }
+
+    fn shop_countdown(&self) -> String {
+        shop_countdown(&self.shop_status, self.status_received_at)
+    }
+
+    /// Écrans remplacés par l'écran « Boutique fermée ».
+    /// Profil toujours accessible ; admin/finances restent ouverts au fournisseur
+    /// pour lui permettre de rouvrir. Sans session, le login reste accessible.
+    fn is_shop_screen_blocked(&self) -> bool {
+        if self.screen == Screen::Profile {
+            return false;
+        }
+        if self.is_supplier() && matches!(self.screen, Screen::Admin | Screen::Finances) {
+            return false;
+        }
+        if self.user.is_none() && self.screen == Screen::Login {
+            return false;
+        }
+        true
+    }
+
+    /// Écran bloquant central : aucun autre panneau ni navigation n'est rendu.
+    fn ui_shop_closed(&mut self, ctx: &egui::Context) {
+        let countdown = self.shop_countdown();
+        let reopens = self.shop_status.reopens_at.clone().unwrap_or_default();
+        let supplier = self.is_supplier();
+        let logged = self.user.is_some();
+
+        egui::CentralPanel::default()
+            .frame(egui::Frame::new().fill(BG))
+            .show(ctx, |ui| {
+                let rect = ui.max_rect();
+                let p = ui.painter();
+                p.rect_filled(rect, 0, BG);
+                p.circle_filled(
+                    egui::pos2(rect.center().x, rect.top() + 30.0),
+                    230.0,
+                    alpha(ORANGE_FLUO, 14),
+                );
+
+                ui.vertical_centered(|ui| {
+                    ui.add_space((rect.height() * 0.20).max(36.0));
+                    card(ui, |ui| {
+                        ui.set_min_width(360.0);
+                        ui.label(
+                            egui::RichText::new("Boutique fermée")
+                                .size(26.0)
+                                .strong()
+                                .color(ORANGE_FLUO),
+                        );
+                        ui.add_space(10.0);
+                        ui.label(
+                            egui::RichText::new("Réouverture dans")
+                                .size(13.0)
+                                .color(MUTED),
+                        );
+                        ui.label(
+                            egui::RichText::new(&countdown)
+                                .size(24.0)
+                                .strong()
+                                .color(ORANGE_FLUO),
+                        );
+                        if !reopens.is_empty() {
+                            ui.add_space(6.0);
+                            ui.label(
+                                egui::RichText::new(format!("Prévue le {}", reopens))
+                                    .size(11.0)
+                                    .color(MUTED),
+                            );
+                        }
+                        ui.add_space(18.0);
+                        ui.horizontal(|ui| {
+                            if logged && btn_ghost(ui, "Mon profil").clicked() {
+                                self.screen = Screen::Profile;
+                                self.on_screen_change();
+                            }
+                            if supplier && btn_ghost(ui, "Administration").clicked() {
+                                self.screen = Screen::Admin;
+                                self.on_screen_change();
+                            }
+                            if !logged && btn_ghost(ui, "Connexion").clicked() {
+                                self.screen = Screen::Login;
+                            }
+                        });
+                    });
+                    ui.add_space(12.0);
+                    ui.label(
+                        egui::RichText::new("Merci de patienter.")
+                            .size(11.0)
+                            .color(MUTED),
+                    );
+                });
+            });
+    }
+
+    /// Carte « Boutique » de l'administration : statut, fermeture, réouverture.
+    fn ui_admin_shop(&mut self, ui: &mut egui::Ui) {
+        let closed = self.shop_status.closed;
+        let status_text = if closed {
+            format!("Fermée — réouverture dans {}", self.shop_countdown())
+        } else {
+            "Ouverte".to_string()
+        };
+        let input = self.shop_reopen_input.trim().to_string();
+        let future = parse_iso_utc(&input)
+            .map(|t| t > unix_now())
+            .unwrap_or(false);
+
+        card(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new("Boutique")
+                        .strong()
+                        .size(15.0)
+                        .color(ORANGE),
+                );
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if btn_ghost(ui, "Rafraîchir").clicked() {
+                        self.last_status_poll = Some(Instant::now());
+                        fetch_shop_status(self.tx.clone(), self.token.clone());
+                    }
+                });
+            });
+            ui.add_space(4.0);
+            ui.label(
+                egui::RichText::new(&status_text)
+                    .size(12.0)
+                    .color(if closed { AMBER } else { GREEN }),
+            );
+            ui.add_space(8.0);
+            ui.label(
+                egui::RichText::new("Date/heure de réouverture (ISO UTC)")
+                    .size(12.0)
+                    .color(MUTED),
+            );
+            ui.add(
+                egui::TextEdit::singleline(&mut self.shop_reopen_input)
+                    .desired_width(f32::INFINITY)
+                    .hint_text("2026-11-26T12:30Z")
+                    .margin(egui::Margin::same(10)),
+            );
+            ui.add_space(8.0);
+            ui.horizontal_wrapped(|ui| {
+                ui.add_enabled_ui(future && !self.busy, |ui| {
+                    if btn_primary(ui, "Fermer temporairement").clicked() {
+                        if let Some(t) = self.token.clone() {
+                            close_shop(self.tx.clone(), t, input.clone());
+                        }
+                    }
+                });
+                if btn_ghost(ui, "Rouvrir maintenant").clicked() {
+                    if let Some(t) = self.token.clone() {
+                        open_shop(self.tx.clone(), t);
+                    }
+                }
+            });
+            if !input.is_empty() && !future {
+                ui.add_space(4.0);
+                ui.label(
+                    egui::RichText::new(
+                        "Date invalide ou déjà passée. Format : AAAA-MM-JJTHH:MMZ (UTC).",
+                    )
+                    .size(11.0)
+                    .color(RED),
+                );
+            }
+        });
+        ui.add_space(8.0);
     }
 
     fn is_supplier(&self) -> bool {
@@ -2297,6 +2727,7 @@ impl ShopApp {
         self.email_verify_code.clear();
         self.order_phone.clear();
         self.admin_tab = 0;
+        self.shop_reopen_input.clear();
         self.create_menu = false;
         self.product_form_open = false;
         self.category_form_open = false;
@@ -3290,6 +3721,7 @@ impl ShopApp {
     }
 
     fn ui_admin(&mut self, ui: &mut egui::Ui) {
+        self.ui_admin_shop(ui);
         ui.horizontal(|ui| {
             if chip(ui, "Produits", self.admin_tab == 0).clicked() {
                 self.admin_tab = 0;
@@ -4460,6 +4892,7 @@ impl eframe::App for ShopApp {
                     self.forgot_modal = false;
                     self.screen = Screen::Boutique;
                     self.set_notice("Connecté");
+                    fetch_shop_status(self.tx.clone(), Some(t.clone()));
                     fetch_products(self.tx.clone(), self.token.clone());
                     fetch_catégories(self.tx.clone(), self.token.clone());
                     fetch_account(self.tx.clone(), t);
@@ -4572,6 +5005,11 @@ impl eframe::App for ShopApp {
                             line.product.discount_until = fresh.discount_until.clone();
                         }
                     }
+                }
+                Msg::ShopStatus(s) => {
+                    self.shop_status = s;
+                    self.status_received_at = Some(Instant::now());
+                    self.last_status_poll = Some(Instant::now());
                 }
                 Msg::Account(a) => {
                     // Garde le header et le formulaire de commande synchronisés.
@@ -4689,6 +5127,16 @@ impl eframe::App for ShopApp {
             }
         }
 
+        // Statut boutique : endpoint public, rafraîchi toutes les 30 s.
+        let status_due = self
+            .last_status_poll
+            .map(|t| t.elapsed() >= Duration::from_secs(30))
+            .unwrap_or(true);
+        if status_due {
+            self.last_status_poll = Some(Instant::now());
+            fetch_shop_status(self.tx.clone(), self.token.clone());
+        }
+
         // ---- rafraichissement automatique ----
         if self.token.is_some() {
             let due = self
@@ -4732,6 +5180,14 @@ impl eframe::App for ShopApp {
         if self.upgrade_modal {
             self.draw_upgrade_modal(ctx);
             ctx.request_repaint_after(Duration::from_millis(250));
+            return;
+        }
+
+        // Boutique fermée : seul l'écran bloquant est rendu (pas de barres,
+        // ni de navigation, ni de modales). Garde-fou central avant tout rendu.
+        if self.shop_status.closed && self.is_shop_screen_blocked() {
+            self.ui_shop_closed(ctx);
+            ctx.request_repaint_after(Duration::from_secs(1));
             return;
         }
 

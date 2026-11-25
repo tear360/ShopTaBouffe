@@ -434,6 +434,46 @@ main {
 .empty .big { font-size: 46px; margin-bottom: 12px; }
 .empty .t { font-weight: 600; color: var(--text); font-size: 16px; margin-bottom: 5px; }
 
+/* ---------- boutique fermée (écran bloquant) ---------- */
+.shop-closed {
+  flex: 1; min-height: 100vh; min-height: 100dvh;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 16px; padding: 28px 18px; box-sizing: border-box; text-align: center;
+  background: radial-gradient(circle at 50% 32%, rgba(255, 154, 77, .12), transparent 58%), var(--bg);
+}
+.shop-closed-logo { font-size: 44px; line-height: 1; color: #FF9A4D; }
+.shop-closed h1 { font-size: 26px; margin: 0; letter-spacing: .2px; }
+.shop-closed-message { margin: 0; color: var(--muted); font-size: 15px; }
+.shop-closed .shop-closed-countdown {
+  color: #FF9A4D; font-size: clamp(30px, 7vw, 46px); font-weight: 800;
+  font-variant-numeric: tabular-nums; letter-spacing: 1px;
+  background: var(--surface); border: 1px solid rgba(255, 154, 77, .45);
+  border-radius: 16px; padding: 14px 24px; box-shadow: var(--shadow);
+}
+.shop-closed-date { margin: -6px 0 0; color: var(--muted); font-size: 12.5px; }
+.shop-closed-links { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+.shop-closed-links .btn-ghost {
+  background: transparent; color: var(--muted); border-color: var(--border);
+}
+.shop-closed-links .btn-ghost:hover { color: var(--text); border-color: #FF9A4D; }
+
+/* ---------- fournisseur : gestion de la boutique ---------- */
+.shop-admin-card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 14px 16px; margin-bottom: 16px;
+}
+.shop-admin-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.shop-admin-head h3 { margin: 0; font-size: 15.5px; }
+.shop-admin-status { color: var(--muted); font-size: 13.5px; margin: 6px 0 12px; }
+.shop-admin-row label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+.shop-admin-row input {
+  background: var(--bg); border: 1px solid var(--border); border-radius: 10px;
+  color: var(--text); color-scheme: dark; padding: 9px 11px; outline: none;
+  width: 100%; max-width: 260px; box-sizing: border-box;
+}
+.shop-admin-row input:focus { border-color: #FF9A4D; }
+.shop-admin-actions { display: flex; gap: 9px; flex-wrap: wrap; margin-top: 12px; }
+
 /* ---------- divers ---------- */
 .error-box {
   background: rgba(255, 107, 107, .1); border: 1px solid rgba(255, 107, 107, .35);
